@@ -14,29 +14,22 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.FitnessCenter
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -55,76 +48,86 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.diettracker.data.db.ExerciseOutcome
+import com.example.diettracker.data.db.ExerciseLogEntity
+import com.example.diettracker.data.model.DiaryEntry
 import com.example.diettracker.data.model.MealType
-import com.example.diettracker.data.repository.TodayExerciseCard
-import com.example.diettracker.data.repository.TodayGroupKind
-import com.example.diettracker.data.repository.TodayPlan
-import com.example.diettracker.data.repository.TodayTrainingGroup
-import com.example.diettracker.data.repository.TrainingRepository
+import com.example.diettracker.data.repository.ActivityRepository
+import com.example.diettracker.domain.SportLibrary
+import com.example.diettracker.ui.components.BurnOverrideDialog
 import com.example.diettracker.ui.components.ConfirmDialog
 import com.example.diettracker.ui.components.DateNavigator
+import com.example.diettracker.ui.components.Dot
+import com.example.diettracker.ui.components.DurationDialog
 import com.example.diettracker.ui.components.EditEntrySheet
+import com.example.diettracker.ui.components.ExerciseEditorDialog
 import com.example.diettracker.ui.components.IntakeSummaryCard
 import com.example.diettracker.ui.components.MacroChip
+import com.example.diettracker.ui.components.SectionHeader
+import com.example.diettracker.ui.components.SportActivityCard
+import com.example.diettracker.ui.components.SportPickerDialog
+import com.example.diettracker.ui.components.StrengthActivityCard
+import com.example.diettracker.ui.theme.AppColors
 import com.example.diettracker.ui.theme.MacroColors
+import com.example.diettracker.ui.theme.Spacing
+import com.example.diettracker.ui.viewmodel.ActivityCard
+import com.example.diettracker.ui.viewmodel.ActivityViewModel
 import com.example.diettracker.ui.viewmodel.DiaryViewModel
-import com.example.diettracker.ui.viewmodel.WorkoutViewModel
 import com.example.diettracker.util.DateUtils
 import kotlinx.coroutines.launch
 
 /**
- * 首页。
+ * 首页（今日）。
  *
- * 三段竖排：当天摄入 / 今日训练 / 今日饮食，每段自己的加号做自己的事。
+ * 三段：
  *
- * 训练段 v6 起直接列出**训练日分组 + 动作卡片**：到期的训练日自动出现，也可以
- * 手动加进来；卡片上按成功 / 失败 / 跳过，训练日层面还有整体跳过和整体延期。
+ *  1. **当天摄入** —— 四项进度条 + 摄入 / 消耗 / 净热量
+ *  2. **今日运动** —— 上段是有氧等运动项目，下段是撸铁（里面是动作卡片）
+ *  3. **今日饮食** —— 当天食物，按餐次分组
+ *
+ * 运动消耗**只显示**，不加回可摄入额度。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TodayScreen(
     viewModel: DiaryViewModel,
-    trainingRepository: TrainingRepository,
+    activityRepository: ActivityRepository,
     onAddFood: (String) -> Unit,
-    onAddTraining: (String) -> Unit,
-    onOpenLog: () -> Unit,
-    onOpenGoals: () -> Unit,
-    onManageDays: () -> Unit
+    onOpenGoals: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // 训练块和详细记录页共用同一个 ViewModel，标记完首页立刻同步。
-    val workoutViewModel: WorkoutViewModel = viewModel(
-        factory = WorkoutViewModel.factory(trainingRepository)
+    val activityViewModel: ActivityViewModel = viewModel(
+        factory = ActivityViewModel.factory(activityRepository)
     )
-    val workoutState by workoutViewModel.home.collectAsStateWithLifecycle()
+    val activityState by activityViewModel.ui.collectAsStateWithLifecycle()
+    val bodyWeightKg = activityState.bodyWeightKg
 
-    var pendingDelete by remember { mutableStateOf<com.example.diettracker.data.model.DiaryEntry?>(null) }
+    var pendingDelete by remember { mutableStateOf<DiaryEntry?>(null) }
     var confirmClearDay by remember { mutableStateOf(false) }
-    var skipDayGroup by remember { mutableStateOf<TodayTrainingGroup?>(null) }
-    var confirmPostpone by remember { mutableStateOf(false) }
-    var removeEntryId by remember { mutableStateOf<Long?>(null) }
-    var editingEntry by remember { mutableStateOf<com.example.diettracker.data.model.DiaryEntry?>(null) }
+    var confirmClearSport by remember { mutableStateOf(false) }
+    var editingEntry by remember { mutableStateOf<DiaryEntry?>(null) }
     var editingVariants by remember {
         mutableStateOf<List<com.example.diettracker.data.db.FoodVariantEntity>>(emptyList())
     }
+    var showSportPicker by remember { mutableStateOf(false) }
+    var durationTarget by remember { mutableStateOf<ActivityCard?>(null) }
+    var burnTarget by remember { mutableStateOf<ActivityCard?>(null) }
+    var deleteActivityTarget by remember { mutableStateOf<ActivityCard?>(null) }
+    var exerciseTarget by remember { mutableStateOf<ExerciseLogEntity?>(null) }
+    var exercisePickerFor by remember { mutableStateOf<ActivityCard?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    /** 打开编辑面板前先把该食物的规格读出来。 */
-    fun startEditing(entry: com.example.diettracker.data.model.DiaryEntry) {
+    fun startEditing(entry: DiaryEntry) {
         editingEntry = entry
         editingVariants = emptyList()
-        scope.launch {
-            editingVariants = viewModel.variantsFor(entry.foodId)
-        }
+        scope.launch { editingVariants = viewModel.variantsFor(entry.foodId) }
     }
 
     LaunchedEffect(state.message) {
@@ -133,32 +136,26 @@ fun TodayScreen(
             viewModel.clearMessage()
         }
     }
-    LaunchedEffect(workoutState.message) {
-        workoutState.message?.let {
+    LaunchedEffect(activityState.message) {
+        activityState.message?.let {
             snackbarHostState.showSnackbar(it)
-            workoutViewModel.clearMessage()
+            activityViewModel.clearMessage()
         }
     }
-    LaunchedEffect(workoutState.error) {
-        workoutState.error?.let {
+    LaunchedEffect(activityState.error) {
+        activityState.error?.let {
             snackbarHostState.showSnackbar(it)
-            workoutViewModel.clearMessage()
+            activityViewModel.clearMessage()
         }
     }
-
-    // 训练块跟着日期走，翻历史能看到那天练了什么。
-    LaunchedEffect(state.date) {
-        workoutViewModel.setDate(state.date)
-    }
+    LaunchedEffect(state.date) { activityViewModel.setDate(state.date) }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("今日") },
                 actions = {
-                    TextButton(onClick = { confirmClearDay = true }) {
-                        Text("清空当天")
-                    }
+                    TextButton(onClick = { confirmClearDay = true }) { Text("清空当天") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
@@ -172,14 +169,14 @@ fun TodayScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
             contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                top = 8.dp,
-                bottom = 32.dp
+                start = Spacing.screenHorizontal,
+                end = Spacing.screenHorizontal,
+                top = 6.dp,
+                bottom = Spacing.listBottom
             ),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(Spacing.sectionGap)
         ) {
-            item {
+            item(key = "date") {
                 DateNavigator(
                     date = state.date,
                     onPreviousDay = viewModel::previousDay,
@@ -189,62 +186,73 @@ fun TodayScreen(
                 )
             }
 
-            // ---------------------------------------------------- 1. 当天摄入
             item(key = "intake") {
-                IntakeSummaryCard(
-                    state = state,
-                    onOpenGoals = onOpenGoals
+                IntakeSummaryCard(state = state, onOpenGoals = onOpenGoals)
+            }
+
+            item(key = "sport_header") {
+                SectionHeader(
+                    title = "今日运动",
+                    icon = Icons.AutoMirrored.Filled.DirectionsRun,
+                    accent = AppColors.Sport,
+                    subtitle = if (activityState.isEmpty) {
+                        null
+                    } else {
+                        "${activityState.totalMinutes} 分钟 · 消耗 ${activityState.totalKcalLabel}"
+                    },
+                    trailing = {
+                        IconButton(onClick = { showSportPicker = true }) {
+                            Icon(
+                                Icons.Filled.Add,
+                                contentDescription = "添加运动",
+                                tint = AppColors.Sport
+                            )
+                        }
+                    }
                 )
             }
 
-            // ------------------------------------------------------ 2. 今日训练
-            item(key = "training_header") {
-                BlockHeader(
-                    icon = { Icon(Icons.Filled.FitnessCenter, contentDescription = null) },
-                    title = "今日训练",
-                    onAdd = { onAddTraining(state.date) },
-                    addDescription = "添加训练"
-                )
-            }
-            item(key = "training_body") {
-                TodayTrainingBlock(
-                    plan = workoutState.plan,
-                    date = state.date,
-                    loading = workoutState.loading,
-                    busy = workoutState.saving,
-                    onAddTraining = { onAddTraining(state.date) },
-                    onManageDays = onManageDays,
-                    onOpenLog = onOpenLog,
-                    onMarkSuccess = workoutViewModel::markSuccess,
-                    onMarkFailure = workoutViewModel::markFailure,
-                    onMarkSkip = workoutViewModel::markSkip,
-                    onReset = workoutViewModel::resetOutcome,
-                    onRemoveEntry = { removeEntryId = it },
-                    onSkipDay = { skipDayGroup = it }
+            item(key = "sport_body") {
+                TodayActivityBlock(
+                    cards = activityState.cards,
+                    loading = activityState.loading,
+                    onAdd = { showSportPicker = true },
+                    onEditDuration = { durationTarget = it },
+                    onEditBurn = { burnTarget = it },
+                    onDelete = { deleteActivityTarget = it },
+                    onAddExercise = { exercisePickerFor = it },
+                    onEditExercise = { exerciseTarget = it },
+                    onDeleteExercise = { activityViewModel.deleteExercise(it) },
+                    onClearDay = { confirmClearSport = true }
                 )
             }
 
-            // ------------------------------------------------------ 3. 今日饮食
             item(key = "food_header") {
-                BlockHeader(
-                    icon = { Icon(Icons.Filled.Restaurant, contentDescription = null) },
+                SectionHeader(
                     title = "今日饮食",
-                    onAdd = { onAddFood(state.date) },
-                    addDescription = "添加食物"
+                    icon = Icons.Filled.Restaurant,
+                    accent = AppColors.Diet,
+                    trailing = {
+                        IconButton(onClick = { onAddFood(state.date) }) {
+                            Icon(
+                                Icons.Filled.Add,
+                                contentDescription = "添加食物",
+                                tint = AppColors.Diet
+                            )
+                        }
+                    }
                 )
             }
 
             if (state.entries.isEmpty() && !state.loading) {
-                item(key = "food_empty") {
-                    EmptyFoodCard(onAddFood = { onAddFood(state.date) })
-                }
+                item(key = "food_empty") { EmptyFoodCard { onAddFood(state.date) } }
             }
 
             state.groupedByMeal.forEach { (meal, entries) ->
                 item(key = "meal_${meal.name}") {
                     MealHeader(meal = meal, totalKcal = entries.sumOf { it.macros.calories })
                 }
-                items(items = entries, key = { it.id }) { entry ->
+                items(items = entries, key = { entry -> "food_${entry.id}" }) { entry ->
                     DiaryEntryCard(
                         entry = entry,
                         onEdit = { startEditing(entry) },
@@ -253,6 +261,103 @@ fun TodayScreen(
                 }
             }
         }
+    }
+
+    // --------------------------------------------------------------- 弹窗
+
+    if (showSportPicker) {
+        SportPickerDialog(
+            title = "添加运动",
+            groups = activityState.sportGroups,
+            hasStrengthAlready = activityState.strengthCards.isNotEmpty(),
+            onPick = { row ->
+                activityViewModel.addSport(row.key)
+                showSportPicker = false
+            },
+            onDismiss = { showSportPicker = false }
+        )
+    }
+
+    durationTarget?.let { card ->
+        DurationDialog(
+            activityName = card.name,
+            currentMinutes = card.activity.durationMinutes,
+            onConfirm = { minutes ->
+                activityViewModel.setDuration(card.id, minutes)
+                durationTarget = null
+            },
+            onDismiss = { durationTarget = null }
+        )
+    }
+
+    burnTarget?.let { card ->
+        BurnOverrideDialog(
+            activityName = card.name,
+            currentKcal = card.activity.burnedKcal,
+            estimatedKcal = SportLibrary.estimateKcal(
+                card.activity.met,
+                bodyWeightKg,
+                card.activity.durationMinutes
+            ),
+            onConfirm = { kcal ->
+                activityViewModel.overrideBurn(card.id, kcal)
+                burnTarget = null
+            },
+            onDismiss = { burnTarget = null }
+        )
+    }
+
+    deleteActivityTarget?.let { card ->
+        ConfirmDialog(
+            title = "删除「${card.name}」？",
+            message = "这一项运动记录会被移除，当天消耗合计随之减少。",
+            confirmLabel = "删除",
+            destructive = true,
+            onConfirm = {
+                activityViewModel.deleteActivity(card.id)
+                deleteActivityTarget = null
+            },
+            onDismiss = { deleteActivityTarget = null }
+        )
+    }
+
+    exercisePickerFor?.let { card ->
+        ExerciseNamePicker(
+            names = activityState.exerciseNames,
+            onPick = { name ->
+                activityViewModel.addExercise(card.id, name)
+                exercisePickerFor = null
+            },
+            onDismiss = { exercisePickerFor = null }
+        )
+    }
+
+    exerciseTarget?.let { exercise ->
+        ExerciseEditorDialog(
+            exerciseName = exercise.exerciseName,
+            initialWeight = exercise.weightKg,
+            initialSets = exercise.sets,
+            initialReps = exercise.reps,
+            onConfirm = { weight, sets, reps ->
+                activityViewModel.updateExercise(exercise.id, weight, sets, reps)
+                exerciseTarget = null
+            },
+            onDismiss = { exerciseTarget = null }
+        )
+    }
+
+    if (confirmClearSport) {
+        ConfirmDialog(
+            title = "清空当天运动？",
+            message = "今天记录的所有运动与动作都会被删除。",
+            confirmLabel = "清空",
+            destructive = true,
+            onConfirm = {
+                activityViewModel.clearDay()
+                confirmClearSport = false
+            },
+            onDismiss = { confirmClearSport = false }
+        )
     }
 
     pendingDelete?.let { entry ->
@@ -272,7 +377,7 @@ fun TodayScreen(
     if (confirmClearDay) {
         ConfirmDialog(
             title = "清空这一天的记录？",
-            message = "${DateUtils.displayDate(state.date)} 的 ${state.entries.size} 条记录" +
+            message = "${DateUtils.displayDate(state.date)} 的 ${state.entries.size} 条饮食记录" +
                 "将被全部删除，此操作不可撤销。",
             confirmLabel = "清空",
             destructive = true,
@@ -281,48 +386,6 @@ fun TodayScreen(
                 confirmClearDay = false
             },
             onDismiss = { confirmClearDay = false }
-        )
-    }
-
-    skipDayGroup?.let { group ->
-        ConfirmDialog(
-            title = "跳过「${group.title}」？",
-            message = "该训练日下的 ${group.pendingCount} 个动作会被全部标记为跳过，" +
-                "从今天移除，也不会进入往期记录。",
-            confirmLabel = "跳过",
-            destructive = true,
-            onConfirm = {
-                workoutViewModel.skipDay(group.key)
-                skipDayGroup = null
-            },
-            onDismiss = { skipDayGroup = null }
-        )
-    }
-
-    removeEntryId?.let { entryId ->
-        ConfirmDialog(
-            title = "从今天移除？",
-            message = "只会把它从今天的日程里拿走，不记录成功或失败，目标重量也不变。",
-            confirmLabel = "移除",
-            onConfirm = {
-                workoutViewModel.removeScheduleEntry(entryId)
-                removeEntryId = null
-            },
-            onDismiss = { removeEntryId = null }
-        )
-    }
-
-    if (confirmPostpone) {
-        ConfirmDialog(
-            title = "延期到明天？",
-            message = "所有训练日统一往后顺延一天：今天的内容整体挪到明天，后面的训练日一起顺延。" +
-                "不会记录成失败或跳过。",
-            confirmLabel = "延期",
-            onConfirm = {
-                workoutViewModel.postponeAll()
-                confirmPostpone = false
-            },
-            onDismiss = { confirmPostpone = false }
         )
     }
 
@@ -367,61 +430,22 @@ fun TodayScreen(
     }
 }
 
-/** 段落标题 + 尾部加号。 */
+/** 今日运动主体：上段运动项目，下段撸铁。 */
 @Composable
-private fun BlockHeader(
-    icon: @Composable () -> Unit,
-    title: String,
-    onAdd: () -> Unit,
-    addDescription: String
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        icon()
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f)
-        )
-        IconButton(onClick = onAdd) {
-            Icon(
-                imageVector = Icons.Filled.Add,
-                contentDescription = addDescription,
-                tint = MaterialTheme.colorScheme.primary
-            )
-        }
-    }
-}
-
-/**
- * 今日训练栏。
- *
- * 只显示「今天该练的东西」：到期的训练日、手动加进来的训练日和单独动作，每个
- * 训练日一组，组里是动作卡片（动作名 + 目标组数 × 次数 + 目标重量 + 三个按钮）。
- */
-@Composable
-private fun TodayTrainingBlock(
-    plan: TodayPlan?,
-    date: String,
+private fun TodayActivityBlock(
+    cards: List<ActivityCard>,
     loading: Boolean,
-    busy: Boolean,
-    onAddTraining: () -> Unit,
-    onManageDays: () -> Unit,
-    onOpenLog: () -> Unit,
-    onMarkSuccess: (String, String) -> Unit,
-    onMarkFailure: (String, String) -> Unit,
-    onMarkSkip: (String, String) -> Unit,
-    onReset: (String, String) -> Unit,
-    onRemoveEntry: (Long) -> Unit,
-    onSkipDay: (TodayTrainingGroup) -> Unit
+    onAdd: () -> Unit,
+    onEditDuration: (ActivityCard) -> Unit,
+    onEditBurn: (ActivityCard) -> Unit,
+    onDelete: (ActivityCard) -> Unit,
+    onAddExercise: (ActivityCard) -> Unit,
+    onEditExercise: (ExerciseLogEntity) -> Unit,
+    onDeleteExercise: (Long) -> Unit,
+    onClearDay: () -> Unit
 ) {
-    val isToday = DateUtils.isToday(date)
+    val sportCards = cards.filterNot { it.isStrength }
+    val strengthCards = cards.filter { it.isStrength }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -430,13 +454,13 @@ private fun TodayTrainingBlock(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(Spacing.cardPadding)) {
             if (loading) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "正在计算今天该练什么…",
+                        text = "正在读取今天的运动…",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -444,269 +468,158 @@ private fun TodayTrainingBlock(
                 return@Card
             }
 
-            if (plan == null || !plan.hasTrainingDays) {
+            if (cards.isEmpty()) {
                 Text(
-                    text = "还没有训练日",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "先创建训练日（比如「胸 + 三头」），给它排好动作目标和频率，" +
-                        "到期的训练日会自动出现在这里。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onManageDays) { Text("创建训练日") }
-                    OutlinedButton(onClick = onAddTraining) { Text("添加到今天") }
-                }
-                return@Card
-            }
-
-            if (!plan.hasAnything) {
-                Text(
-                    text = if (plan.isToday) "今天不用练" else "这一天没有训练安排",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "没有到期的训练日。想练的话可以从下面手动加一个进来。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onAddTraining) { Text("添加到今天") }
-                    OutlinedButton(onClick = onManageDays) { Text("管理训练日") }
-                }
-                return@Card
-            }
-
-            // 汇总行
-            Text(
-                text = "共 ${plan.totalCards} 个动作 · 已完成 ${plan.doneCards}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            plan.groups.forEachIndexed { index, group ->
-                if (index > 0) {
-                    Spacer(Modifier.height(10.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                }
-                Spacer(Modifier.height(10.dp))
-                TrainingGroupBlock(
-                    group = group,
-                    isToday = isToday,
-                    busy = busy,
-                    onMarkSuccess = { cardKey -> onMarkSuccess(group.key, cardKey) },
-                    onMarkFailure = { cardKey -> onMarkFailure(group.key, cardKey) },
-                    onMarkSkip = { cardKey -> onMarkSkip(group.key, cardKey) },
-                    onReset = { cardKey -> onReset(group.key, cardKey) },
-                    onRemoveEntry = onRemoveEntry,
-                    onSkipDay = { onSkipDay(group) }
-                )
-            }
-
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = onOpenLog,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(
-                        Icons.Filled.PlayArrow,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text("时长/热量")
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "「时长/热量」里填今天的训练时长，系统按 MET 估算消耗，" +
-                    "结果只用于饮食页的「运动消耗」显示。",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-/** 一个训练日（或「单独动作」）的卡片组。 */
-@Composable
-private fun TrainingGroupBlock(
-    group: TodayTrainingGroup,
-    isToday: Boolean,
-    busy: Boolean,
-    onMarkSuccess: (String) -> Unit,
-    onMarkFailure: (String) -> Unit,
-    onMarkSkip: (String) -> Unit,
-    onReset: (String) -> Unit,
-    onRemoveEntry: (Long) -> Unit,
-    onSkipDay: () -> Unit
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = group.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            val subtitle = when {
-                group.subtitle.isNotBlank() -> group.subtitle
-                group.kind == TodayGroupKind.SINGLE -> "单独加进来的动作"
-                else -> ""
-            }
-            if (subtitle.isNotBlank()) {
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        if (group.cards.isNotEmpty()) {
-            Text(
-                text = group.progressLabel,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (group.allDone) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                }
-            )
-        }
-    }
-
-    if (group.cards.isEmpty()) {
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = "这个训练日还没有动作，去「我的 → 训练日」里给它加动作。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        return
-    }
-
-    Spacer(Modifier.height(6.dp))
-    group.cards.forEach { card ->
-        ExerciseCardRow(
-            card = card,
-            enabled = !busy,
-            onSuccess = { onMarkSuccess(card.key) },
-            onFailure = { onMarkFailure(card.key) },
-            onSkip = { onMarkSkip(card.key) },
-            onReset = { onReset(card.key) }
-        )
-        Spacer(Modifier.height(8.dp))
-    }
-
-    if (isToday && group.canSkipWholeDay) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = onSkipDay,
-                modifier = Modifier.weight(1f)
-            ) { Text("跳过训练日") }
-            group.manualEntryId?.let { entryId ->
-                OutlinedButton(
-                    onClick = { onRemoveEntry(entryId) },
-                    modifier = Modifier.weight(1f)
-                ) { Text("从今天移除") }
-            }
-        }
-    }
-}
-
-/** 一张动作卡片：动作名、目标组数 × 次数、目标重量，以及成功 / 失败 / 跳过。 */
-@Composable
-private fun ExerciseCardRow(
-    card: TodayExerciseCard,
-    enabled: Boolean,
-    onSuccess: () -> Unit,
-    onFailure: () -> Unit,
-    onSkip: () -> Unit,
-    onReset: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-        )
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = card.exerciseName,
+                    text = "今天还没有运动记录",
                     style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f)
+                    fontWeight = FontWeight.Medium
                 )
-                card.outcome?.let { outcome ->
-                    AssistChip(
-                        onClick = { if (enabled) onReset() },
-                        label = { Text(outcome.label) }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "点右上角「+」选一项运动（跑步、游泳、撸铁…），" +
+                        "填个时长就会按 MET 算出消耗。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(Spacing.itemGap))
+                TextButton(onClick = onAdd) { Text("添加运动") }
+                return@Card
+            }
+
+            // 上段：运动
+            SubSectionLabel(text = "运动", accent = AppColors.Sport)
+            Spacer(Modifier.height(8.dp))
+            if (sportCards.isEmpty()) {
+                Text(
+                    text = "还没有有氧 / 操课记录",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                sportCards.forEach { card ->
+                    SportActivityCard(
+                        card = card,
+                        onEditDuration = { onEditDuration(card) },
+                        onEditBurn = { onEditBurn(card) },
+                        onDelete = { onDelete(card) }
                     )
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+
+            Spacer(Modifier.height(6.dp))
+            // 下段：撸铁
+            SubSectionLabel(text = "撸铁", accent = AppColors.Strength)
+            Spacer(Modifier.height(8.dp))
+            if (strengthCards.isEmpty()) {
+                Text(
+                    text = "今天还没练力量。点右上角「+」选「撸铁」，就能往里加动作。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                strengthCards.forEach { card ->
+                    StrengthActivityCard(
+                        card = card,
+                        onEditDuration = { onEditDuration(card) },
+                        onEditBurn = { onEditBurn(card) },
+                        onDelete = { onDelete(card) },
+                        onAddExercise = { onAddExercise(card) },
+                        onEditExercise = onEditExercise,
+                        onDeleteExercise = onDeleteExercise
+                    )
+                    Spacer(Modifier.height(8.dp))
                 }
             }
 
             Spacer(Modifier.height(4.dp))
-            Text(
-                text = "目标 ${card.targetLabel} · ${card.weightProgressLabel}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            card.lastSummary?.let {
-                Spacer(Modifier.height(2.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = "上次 $it",
+                    text = "合计 ${Math.round(cards.sumOf { it.activity.burnedKcal })} kcal" +
+                        "（只作显示）",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            }
-
-            if (card.resultText.isNotBlank()) {
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = card.resultText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilledTonalButton(
-                    onClick = onSuccess,
-                    enabled = enabled,
-                    modifier = Modifier.weight(1f)
-                ) { Text("成功") }
-                OutlinedButton(
-                    onClick = onFailure,
-                    enabled = enabled,
-                    modifier = Modifier.weight(1f)
-                ) { Text("失败") }
-                OutlinedButton(
-                    onClick = onSkip,
-                    enabled = enabled,
-                    modifier = Modifier.weight(1f)
-                ) { Text("跳过") }
-            }
-            if (card.outcome != null) {
-                Spacer(Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onReset, enabled = enabled) { Text("重新选择") }
-                }
+                TextButton(onClick = onClearDay) { Text("清空") }
             }
         }
     }
+}
+
+@Composable
+private fun SubSectionLabel(text: String, accent: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Dot(color = accent, size = 7)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = accent
+        )
+    }
+}
+
+/** 选动作名的弹窗。 */
+@Composable
+private fun ExerciseNamePicker(
+    names: List<String>,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(names, query) {
+        val q = query.trim()
+        if (q.isEmpty()) names else names.filter { it.contains(q, ignoreCase = true) }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("添加动作") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("搜索动作") },
+                    singleLine = true
+                )
+                Spacer(Modifier.height(8.dp))
+                if (filtered.isEmpty()) {
+                    Text(
+                        text = "没有匹配的动作",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.height(360.dp)) {
+                        items(items = filtered, key = { it }) { name ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = { onPick(name) }) { Text("添加") }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("完成") }
+        }
+    )
 }
 
 @Composable
@@ -723,10 +636,7 @@ private fun EmptyFoodCard(onAddFood: () -> Unit) {
                 .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = "这一天还没有记录",
-                style = MaterialTheme.typography.titleMedium
-            )
+            Text(text = "这一天还没有记录", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
             Text(
                 text = "从食物库选一个食物，按克数或按份数记下来",
@@ -763,7 +673,7 @@ private fun MealHeader(meal: MealType, totalKcal: Double) {
 
 @Composable
 private fun DiaryEntryCard(
-    entry: com.example.diettracker.data.model.DiaryEntry,
+    entry: DiaryEntry,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -777,13 +687,13 @@ private fun DiaryEntryCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 14.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+                .padding(start = Spacing.cardPadding, end = 4.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = entry.foodName,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Medium
                 )
                 Spacer(Modifier.height(2.dp))
@@ -799,13 +709,12 @@ private fun DiaryEntryCard(
                     MacroChip("脂", entry.macros.fat, MacroColors.Fat)
                 }
             }
-
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     text = "${Math.round(entry.macros.calories)}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MacroColors.Calories
                 )
                 Text(
                     text = "kcal",
@@ -813,13 +722,8 @@ private fun DiaryEntryCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
             IconButton(onClick = onEdit) {
-                Icon(
-                    Icons.Filled.Edit,
-                    contentDescription = "编辑",
-                    modifier = Modifier.size(20.dp)
-                )
+                Icon(Icons.Filled.Edit, contentDescription = "编辑", modifier = Modifier.size(20.dp))
             }
             IconButton(onClick = onDelete) {
                 Icon(

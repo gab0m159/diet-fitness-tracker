@@ -63,10 +63,7 @@ import com.example.diettracker.ui.viewmodel.ProfileViewModel
 @Composable
 fun ProfileScreen(
     viewModel: ProfileViewModel,
-    onOpenGoals: () -> Unit = {},
-    onOpenPlan: () -> Unit = {},
-    onOpenHistory: () -> Unit = {},
-    onOpenLibrary: () -> Unit = {}
+    onOpenGoals: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -103,24 +100,6 @@ fun ProfileScreen(
                     "蛋白 ${round(state.currentGoalProtein)}g / " +
                     "脂肪 ${round(state.currentGoalFat)}g",
                 onClick = onOpenGoals
-            )
-            Spacer(Modifier.height(8.dp))
-            EntryCard(
-                title = "训练日",
-                subtitle = "创建训练日、排动作与目标重量、设置几天一次",
-                onClick = onOpenPlan
-            )
-            Spacer(Modifier.height(8.dp))
-            EntryCard(
-                title = "往期训练记录",
-                subtitle = "成功 / 失败的动作记录（跳过的不显示）",
-                onClick = onOpenHistory
-            )
-            Spacer(Modifier.height(8.dp))
-            EntryCard(
-                title = "动作与拉伸库",
-                subtitle = "训练动作、拉伸动作与食物",
-                onClick = onOpenLibrary
             )
 
             Spacer(Modifier.height(16.dp))

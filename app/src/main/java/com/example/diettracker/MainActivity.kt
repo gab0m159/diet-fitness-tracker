@@ -5,14 +5,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.example.diettracker.data.db.AppDatabase
+import com.example.diettracker.data.repository.ActivityRepository
 import com.example.diettracker.data.repository.DietRepository
-import com.example.diettracker.data.repository.TrainingRepository
 import com.example.diettracker.ui.DietTrackerRoot
 import com.example.diettracker.ui.theme.DietTrackerTheme
 
 /**
- * The single Activity of the app. All screens are Compose destinations hosted by
- * `DietTrackerRoot`, which owns the NavHost.
+ * 唯一的 Activity。所有界面都是 `DietTrackerRoot` 里的 Compose 目的地。
  */
 class MainActivity : ComponentActivity() {
 
@@ -20,20 +19,24 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        // `android:name=".DietTrackerApp"` in the manifest makes this cast succeed.
-        // Fall back to building the graph here (rather than crashing) if that
-        // attribute is ever missing, e.g. when merging manifests in a variant.
+        // 清单里的 android:name=".DietTrackerApp" 保证这个转换成立；万一缺失
+        // （例如某个变体合并清单时），就地兜底构建，而不是崩溃。
         val app = application
         val database = AppDatabase.getInstance(this)
-        val repository = if (app is DietTrackerApp) app.repository else DietRepository(database)
-        val trainingRepository =
-            if (app is DietTrackerApp) app.trainingRepository else TrainingRepository(database)
+        val dietRepository =
+            if (app is DietTrackerApp) app.dietRepository else DietRepository(database)
+        val activityRepository =
+            if (app is DietTrackerApp) {
+                app.activityRepository
+            } else {
+                ActivityRepository(database)
+            }
 
         setContent {
             DietTrackerTheme {
                 DietTrackerRoot(
-                    repository = repository,
-                    trainingRepository = trainingRepository
+                    dietRepository = dietRepository,
+                    activityRepository = activityRepository
                 )
             }
         }

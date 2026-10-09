@@ -20,36 +20,42 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.diettracker.data.model.FoodCategory
+import com.example.diettracker.data.repository.ActivityRepository
 import com.example.diettracker.data.repository.DietRepository
-import com.example.diettracker.data.repository.TrainingRepository
+import com.example.diettracker.ui.theme.Spacing
 import com.example.diettracker.ui.viewmodel.LibraryViewModel
 
-/** The three sections of the "库" tab. */
-private val segments = listOf("训练动作", "拉伸", "食物")
+/** 库页的一级菜单。 */
+private val topLevelSegments = listOf("运动", "食物")
+
+/** 「运动」下面的二级菜单。 */
+private val sportSegments = listOf("运动", "拉伸")
 
 /**
- * The "库" tab: one segmented control switching between the exercise library, the
- * stretch library and the food library.
+ * 「库」这一栏。
  *
- * The screens are composed directly rather than nested in their own NavHost, so
- * the bottom bar stays visible and the selected segment survives recomposition.
+ * 一级菜单只有两项：**运动** 和 **食物**。运动下面再分 **运动**（项目清单）与
+ * **拉伸**（按肌群分组的拉伸指导）。
+ *
+ * 一级 / 二级都用分段控件，不做嵌套导航——底部栏始终可见，切换也不会丢状态。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     dietRepository: DietRepository,
-    trainingRepository: TrainingRepository,
+    activityRepository: ActivityRepository,
     onCreateFood: () -> Unit,
     onEditFood: (Long) -> Unit,
     onBrowseBundled: (FoodCategory) -> Unit,
-    /** Set when navigated here from an exercise's "拉伸 ↗" button. */
+    /** 从别处跳进来时直接落在拉伸上（保留参数，方便以后加「练后拉伸」入口）。 */
     initialStretch: String? = null
 ) {
     val viewModel: LibraryViewModel = viewModel(
-        factory = LibraryViewModel.factory(trainingRepository)
+        factory = LibraryViewModel.factory(activityRepository)
     )
 
-    var selected by remember(initialStretch) {
+    var topLevel by remember { mutableIntStateOf(0) }
+    var sportLevel by remember(initialStretch) {
         mutableIntStateOf(if (initialStretch.isNullOrBlank()) 0 else 1)
     }
     var highlightStretch by remember(initialStretch) { mutableStateOf(initialStretch) }
@@ -58,37 +64,48 @@ fun LibraryScreen(
         SingleChoiceSegmentedButtonRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(horizontal = Spacing.screenHorizontal, vertical = 8.dp)
         ) {
-            segments.forEachIndexed { index, label ->
+            topLevelSegments.forEachIndexed { index, label ->
                 SegmentedButton(
-                    selected = selected == index,
-                    onClick = {
-                        selected = index
-                        // Clear the highlight once the user navigates manually.
-                        if (index != 1) highlightStretch = null
-                    },
-                    shape = SegmentedButtonDefaults.itemShape(index, segments.size),
+                    selected = topLevel == index,
+                    onClick = { topLevel = index },
+                    shape = SegmentedButtonDefaults.itemShape(index, topLevelSegments.size),
                     label = { Text(label, style = MaterialTheme.typography.labelLarge) }
                 )
             }
         }
 
-        when (selected) {
-            0 -> ExerciseLibraryScreen(
-                viewModel = viewModel,
-                onOpenStretch = { stretchName ->
-                    highlightStretch = stretchName.ifBlank { null }
-                    selected = 1
+        if (topLevel == 0) {
+            SingleChoiceSegmentedButtonRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.screenHorizontal)
+                    .padding(bottom = 6.dp)
+            ) {
+                sportSegments.forEachIndexed { index, label ->
+                    SegmentedButton(
+                        selected = sportLevel == index,
+                        onClick = {
+                            sportLevel = index
+                            if (index != 1) highlightStretch = null
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index, sportSegments.size),
+                        label = { Text(label, style = MaterialTheme.typography.labelMedium) }
+                    )
                 }
-            )
+            }
 
-            1 -> StretchLibraryScreen(
-                viewModel = viewModel,
-                highlightStretch = highlightStretch
-            )
-
-            else -> FoodLibraryScreen(
+            if (sportLevel == 0) {
+                SportLibraryScreen(activityRepository = activityRepository)
+            } else {
+                StretchLibraryScreen(
+                    viewModel = viewModel,
+                    highlightStretch = highlightStretch
+                )
+            }
+        } else {
+            FoodLibraryScreen(
                 repository = dietRepository,
                 onCreateFood = onCreateFood,
                 onEditFood = onEditFood,

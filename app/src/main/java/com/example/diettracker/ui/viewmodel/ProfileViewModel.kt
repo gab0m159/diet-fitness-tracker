@@ -5,7 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.diettracker.data.db.UserProfileEntity
 import com.example.diettracker.data.repository.DietRepository
-import com.example.diettracker.data.repository.TrainingRepository
+import com.example.diettracker.data.repository.ActivityRepository
 import com.example.diettracker.data.model.ActivityLevel
 import com.example.diettracker.data.model.GoalMode
 import com.example.diettracker.data.model.Sex
@@ -70,7 +70,7 @@ data class ProfileUiState(
 
 class ProfileViewModel(
     private val dietRepository: DietRepository,
-    private val trainingRepository: TrainingRepository
+    private val activityRepository: ActivityRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProfileUiState())
@@ -78,7 +78,7 @@ class ProfileViewModel(
 
     init {
         viewModelScope.launch {
-            val profile = trainingRepository.getProfile()
+            val profile = activityRepository.getProfile()
             _uiState.update {
                 it.copy(
                     height = trimNumber(profile.heightCm),
@@ -157,7 +157,7 @@ class ProfileViewModel(
                 activityLevel = state.activity.name,
                 goalMode = state.goalMode.name
             )
-            trainingRepository.saveProfile(entity).fold(
+            activityRepository.saveProfile(entity).fold(
                 onSuccess = {
                     _uiState.update { it.copy(saving = false, message = "身体数据已保存") }
                 },
@@ -227,11 +227,11 @@ class ProfileViewModel(
     companion object {
         fun factory(
             dietRepository: DietRepository,
-            trainingRepository: TrainingRepository
+            activityRepository: ActivityRepository
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                ProfileViewModel(dietRepository, trainingRepository) as T
+                ProfileViewModel(dietRepository, activityRepository) as T
         }
     }
 }

@@ -11,26 +11,21 @@ import kotlinx.coroutines.launch
 
 @Database(
     entities = [
-        // --- diet（v5 -> v6 结构未变，迁移时原样保留）------------------------
+        // --- 饮食（结构未变）------------------------------------------------
         FoodEntity::class,
         FoodVariantEntity::class,
         DietEntryEntity::class,
         MacroGoalEntity::class,
-        // --- body metrics -------------------------------------------------
+        // --- 身体数据 -------------------------------------------------------
         UserProfileEntity::class,
-        // --- training -----------------------------------------------------
-        UserTrainingGoalEntity::class,
-        TrainingSplitEntity::class,
-        TrainingDayExerciseEntity::class,
-        DayScheduleEntity::class,
-        WorkoutSessionEntity::class,
-        ExerciseRecordEntity::class,
-        // --- user-created library ------------------------------------------
+        // --- 运动（v7 新模型）----------------------------------------------
+        ActivityLogEntity::class,
+        ExerciseLogEntity::class,
+        // --- 用户自建内容 ---------------------------------------------------
         CustomExerciseEntity::class,
-        CustomStretchEntity::class,
-        ExerciseStatusEntity::class
+        CustomStretchEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -41,18 +36,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun macroGoalDao(): MacroGoalDao
 
     abstract fun userProfileDao(): UserProfileDao
-    abstract fun userTrainingGoalDao(): UserTrainingGoalDao
 
-    abstract fun trainingSplitDao(): TrainingSplitDao
-    abstract fun trainingDayExerciseDao(): TrainingDayExerciseDao
-    abstract fun dayScheduleDao(): DayScheduleDao
-
-    abstract fun workoutSessionDao(): WorkoutSessionDao
-    abstract fun exerciseRecordDao(): ExerciseRecordDao
+    abstract fun activityLogDao(): ActivityLogDao
+    abstract fun exerciseLogDao(): ExerciseLogDao
 
     abstract fun customExerciseDao(): CustomExerciseDao
     abstract fun customStretchDao(): CustomStretchDao
-    abstract fun exerciseStatusDao(): ExerciseStatusDao
 
     companion object {
         private const val DB_NAME = "diet_tracker.db"
@@ -67,13 +56,10 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME)
-                // v5 -> v6 rewrote the training module (training days by interval,
-                // per-plan exercise targets, per-day schedule entries). See
-                // MIGRATIONS below: the food library, the diary and the body
-                // profile are deliberately preserved, only the training tables are
-                // rebuilt. The destructive fallback stays as a last resort for
-                // paths we have no explicit migration for.
-                .addMigrations(*MIGRATIONS)
+                // v6 -> v7 把「训练日 + 频率 + 步进」整套模型换成了「运动项目 + 时长 +
+                // MET」。旧训练表语义上无法映射到新模型（没有训练日、没有成功失败、
+                // 没有步进），所以 v7 走破坏式迁移并在重建后重新播种食物库。
+                // 这一步已与用户确认：升级会清空本地数据。
                 .fallbackToDestructiveMigration()
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
@@ -83,17 +69,13 @@ abstract class AppDatabase : RoomDatabase() {
 
                     override fun onDestructiveMigration(db: SupportSQLiteDatabase) {
                         super.onDestructiveMigration(db)
-                        // Tables were dropped and recreated; re-seed the bundled
-                        // content so the library is not empty after an upgrade.
+                        // 表被重建过，重新播种内置内容，避免库是空的。
                         seed(INSTANCE)
                     }
                 })
                 .build()
 
-        /**
-         * Inserts the bundled food library (user foods start empty) plus the
-         * single-row default profile/goal records.
-         */
+        /** 写入内置食物库（用户自建食物不动）+ 身体数据默认行。 */
         private fun seed(database: AppDatabase?) {
             val db = database ?: return
             CoroutineScope(Dispatchers.IO).launch {
@@ -101,11 +83,8 @@ abstract class AppDatabase : RoomDatabase() {
                     db.foodDao(),
                     db.foodVariantDao()
                 )
-                // Default singletons so first launch has sane values.
                 db.userProfileDao().get() ?: db.userProfileDao()
                     .upsert(UserProfileEntity.default())
-                db.userTrainingGoalDao().get() ?: db.userTrainingGoalDao()
-                    .upsert(UserTrainingGoalEntity.default())
             }
         }
     }

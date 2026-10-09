@@ -207,19 +207,14 @@ class DiaryViewModel(
 
     companion object {
         /**
-         * @param trainingRepository accepted for symmetry with the other
-         *        ViewModels; the training block on the home screen has its own
-         *        [WorkoutViewModel].
+         * 只需饮食仓库；运动那一块由今日页自己的 ActivityViewModel 负责。
          */
-        fun factory(
-            repository: DietRepository,
-            @Suppress("UNUSED_PARAMETER")
-            trainingRepository: com.example.diettracker.data.repository.TrainingRepository
-        ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                DiaryViewModel(repository) as T
-        }
+        fun factory(repository: DietRepository): ViewModelProvider.Factory =
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                    DiaryViewModel(repository) as T
+            }
     }
 }
 

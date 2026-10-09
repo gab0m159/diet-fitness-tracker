@@ -297,17 +297,16 @@ class DietRepository(private val db: AppDatabase) {
     // -------------------------------------------------- workout integration
 
     /**
-     * Calories burned by workouts on [date].
+     * 某一天运动消耗的热量合计。
      *
-     * Read straight from the training tables so the diary can show a net figure.
-     * Per product decision this value is **display-only** and never increases the
-     * remaining macro allowance.
+     * 直接读 `activity_logs`（v7 起运动记录只有这一张表：运动项目 + 时长 + MET）。
+     * 按产品约定这个数字**只用于显示**，永远不会增加当天可摄入的额度。
      */
     fun observeBurnedKcal(date: String): Flow<Double> =
-        db.workoutSessionDao().observeBurnedKcal(date)
+        db.activityLogDao().observeBurnedKcal(date)
 
     suspend fun getBurnedKcal(date: String): Double =
-        db.workoutSessionDao().getBurnedKcal(date)
+        db.activityLogDao().getBurnedKcal(date)
 }
 
 /** A day's macro totals plus how many entries produced them. */
