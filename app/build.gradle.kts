@@ -1,3 +1,8 @@
+// 发布签名用的口令文件读取（放在仓库之外，见根目录 .release/）。
+// 显式 import 是必要的：在 Kotlin DSL 里直接写 java.util.Properties 会被当成
+// android{} 块内的引用而解析失败。
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -16,6 +21,38 @@ android {
         versionName = "1.0"
     }
 
+    // 发布用的正式签名。密钥与口令都放在**仓库之外**（见根目录的 .release/），
+    // 口令通过 keystore.properties 读取，这个文件在 .gitignore 里，绝不入库。
+    //
+    // 文件缺失时（例如别人 clone 下来）自动退化为「不签名」，这样打包 release 会
+    // 产出未签名包而不是直接构建失败。
+    val keystorePropsFile = rootProject.file("../.release/keystore.properties")
+    val keystoreProps = Properties()
+    if (keystorePropsFile.exists()) {
+        keystorePropsFile.inputStream().use { stream -> keystoreProps.load(stream) }
+    }
+
+    signingConfigs {
+        // Keep the debug signing keystore inside the build directory instead of the
+        // default ~/.android/debug.keystore. This keeps the build self-contained and
+        // avoids permission problems in restricted/sandboxed environments.
+        getByName("debug") {
+            storeFile = rootProject.file("build/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+        create("release") {
+            val path = keystoreProps.getProperty("storeFile")
+            if (path != null) {
+                storeFile = rootProject.file(path)
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -23,18 +60,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-        }
-    }
-
-    // Keep the debug signing keystore inside the build directory instead of the
-    // default ~/.android/debug.keystore. This keeps the build self-contained and
-    // avoids permission problems in restricted/sandboxed environments.
-    signingConfigs {
-        getByName("debug") {
-            storeFile = rootProject.file("build/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            if (keystoreProps.getProperty("storeFile") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
