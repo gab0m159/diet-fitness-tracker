@@ -79,6 +79,10 @@ interface ExerciseLogDao {
     @Query("SELECT * FROM exercise_logs WHERE date = :date ORDER BY position ASC, id ASC")
     suspend fun getByDate(date: String): List<ExerciseLogEntity>
 
+    /** 同上的订阅版：动作卡片增删改时能实时刷新当天列表。 */
+    @Query("SELECT * FROM exercise_logs WHERE date = :date ORDER BY position ASC, id ASC")
+    fun observeByDate(date: String): Flow<List<ExerciseLogEntity>>
+
     @Query(
         """
         SELECT * FROM exercise_logs

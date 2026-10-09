@@ -191,6 +191,10 @@ class ActivityRepository(private val db: AppDatabase) {
     suspend fun getExercisesOn(date: String): List<ExerciseLogEntity> =
         exerciseLogDao.getByDate(date)
 
+    /** 同上的订阅版，供今日页实时刷新动作卡片。 */
+    fun observeExercisesOn(date: String): Flow<List<ExerciseLogEntity>> =
+        exerciseLogDao.observeByDate(date)
+
     /**
      * 加一个动作卡片。
      *

@@ -29,7 +29,7 @@ import com.example.diettracker.ui.viewmodel.LibraryViewModel
 private val topLevelSegments = listOf("运动", "食物")
 
 /** 「运动」下面的二级菜单。 */
-private val sportSegments = listOf("运动", "拉伸")
+private val sportSegments = listOf("运动", "撸铁", "拉伸")
 
 /**
  * 「库」这一栏。
@@ -56,7 +56,7 @@ fun LibraryScreen(
 
     var topLevel by remember { mutableIntStateOf(0) }
     var sportLevel by remember(initialStretch) {
-        mutableIntStateOf(if (initialStretch.isNullOrBlank()) 0 else 1)
+        mutableIntStateOf(if (initialStretch.isNullOrBlank()) 0 else 2)
     }
     var highlightStretch by remember(initialStretch) { mutableStateOf(initialStretch) }
 
@@ -88,7 +88,7 @@ fun LibraryScreen(
                         selected = sportLevel == index,
                         onClick = {
                             sportLevel = index
-                            if (index != 1) highlightStretch = null
+                            if (index != 2) highlightStretch = null
                         },
                         shape = SegmentedButtonDefaults.itemShape(index, sportSegments.size),
                         label = { Text(label, style = MaterialTheme.typography.labelMedium) }
@@ -96,10 +96,15 @@ fun LibraryScreen(
                 }
             }
 
-            if (sportLevel == 0) {
-                SportLibraryScreen(activityRepository = activityRepository)
-            } else {
-                StretchLibraryScreen(
+            when (sportLevel) {
+                0 -> SportLibraryScreen(activityRepository = activityRepository)
+                1 -> StrengthLibraryScreen(
+                    viewModel = viewModel(
+                        factory = com.example.diettracker.ui.viewmodel.ExerciseLibraryViewModel
+                            .factory(activityRepository)
+                    )
+                )
+                else -> StretchLibraryScreen(
                     viewModel = viewModel,
                     highlightStretch = highlightStretch
                 )

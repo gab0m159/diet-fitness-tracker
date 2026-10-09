@@ -13,6 +13,7 @@ import com.example.diettracker.util.DateUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -96,10 +97,13 @@ class ActivityViewModel(
     private var bodyWeightKg: Double = 70.0
 
     init {
+        // 立刻订阅**今天**的运动。之前只在 setDate() 里订阅，而首页首次进入并不会
+        // 调用 setDate，于是 loading 永远停在 true、运动区一直显示「正在读取」，
+        // 连带「加动作」按钮都渲染不出来。
+        observeDate(_ui.value.date)
         viewModelScope.launch {
             bodyWeightKg = repository.currentWeightKg()
             refreshSportLibrary()
-            refreshExerciseNames()
             _ui.update { it.copy(bodyWeightKg = bodyWeightKg) }
         }
         viewModelScope.launch {
@@ -109,10 +113,17 @@ class ActivityViewModel(
                 _ui.update { it.copy(bodyWeightKg = bodyWeightKg) }
             }
         }
+        // 动作库随时可能新增自建动作，持续订阅，保证「加动作」里立刻能看到。
+        viewModelScope.launch {
+            repository.observeCustomExercises().collect {
+                refreshExerciseNames()
+            }
+        }
     }
 
     /** 切到某一天，重新读当天的运动。 */
     fun setDate(date: String) {
+        if (_ui.value.date == date && observingDate == date) return
         _ui.update { it.copy(date = date, loading = true) }
         observeDate(date)
     }
@@ -122,20 +133,29 @@ class ActivityViewModel(
     private fun observeDate(date: String) {
         if (observingDate == date) return
         observingDate = date
+        // 同时订阅「当天的运动」和「动作表」：撸铁下面挂的动作卡片增删改时，
+        // 只订阅活动表是收不到通知的，卡片会一直停在旧内容。
         viewModelScope.launch {
-            repository.observeActivities(date).collect { activities ->
-                val cards = activities.map { activity ->
-                    ActivityCard(
-                        activity = activity,
-                        exercises = if (activity.isStrength) {
-                            repository.getExercises(activity.id)
-                        } else {
-                            emptyList()
-                        }
-                    )
+            combine(
+                repository.observeActivities(date),
+                repository.observeExercisesOn(date)
+            ) { activities, exercisesByDate -> activities to exercisesByDate }
+                .collect { (activities, allExercises) ->
+                    // 只有当前正在看的这一天，才允许写进 UI（避免切日期时旧数据覆盖）。
+                    if (observingDate != date) return@collect
+                    val byActivity = allExercises.groupBy { it.activityId }
+                    val cards = activities.map { activity ->
+                        ActivityCard(
+                            activity = activity,
+                            exercises = if (activity.isStrength) {
+                                byActivity[activity.id].orEmpty()
+                            } else {
+                                emptyList()
+                            }
+                        )
+                    }
+                    _ui.update { it.copy(cards = cards, loading = false) }
                 }
-                _ui.update { it.copy(cards = cards, loading = false) }
-            }
         }
     }
 

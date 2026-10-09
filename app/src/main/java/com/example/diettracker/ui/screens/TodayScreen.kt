@@ -190,6 +190,42 @@ fun TodayScreen(
                 IntakeSummaryCard(state = state, onOpenGoals = onOpenGoals)
             }
 
+            // ---------------------------------------------------- 2. 今日饮食
+            item(key = "food_header") {
+                SectionHeader(
+                    title = "今日饮食",
+                    icon = Icons.Filled.Restaurant,
+                    accent = AppColors.Diet,
+                    trailing = {
+                        IconButton(onClick = { onAddFood(state.date) }) {
+                            Icon(
+                                Icons.Filled.Add,
+                                contentDescription = "添加食物",
+                                tint = AppColors.Diet
+                            )
+                        }
+                    }
+                )
+            }
+
+            if (state.entries.isEmpty() && !state.loading) {
+                item(key = "food_empty") { EmptyFoodCard { onAddFood(state.date) } }
+            }
+
+            state.groupedByMeal.forEach { (meal, entries) ->
+                item(key = "meal_${meal.name}") {
+                    MealHeader(meal = meal, totalKcal = entries.sumOf { it.macros.calories })
+                }
+                items(items = entries, key = { entry -> "food_${entry.id}" }) { entry ->
+                    DiaryEntryCard(
+                        entry = entry,
+                        onEdit = { startEditing(entry) },
+                        onDelete = { pendingDelete = entry }
+                    )
+                }
+            }
+
+            // ---------------------------------------------------- 3. 今日运动
             item(key = "sport_header") {
                 SectionHeader(
                     title = "今日运动",
@@ -225,40 +261,6 @@ fun TodayScreen(
                     onDeleteExercise = { activityViewModel.deleteExercise(it) },
                     onClearDay = { confirmClearSport = true }
                 )
-            }
-
-            item(key = "food_header") {
-                SectionHeader(
-                    title = "今日饮食",
-                    icon = Icons.Filled.Restaurant,
-                    accent = AppColors.Diet,
-                    trailing = {
-                        IconButton(onClick = { onAddFood(state.date) }) {
-                            Icon(
-                                Icons.Filled.Add,
-                                contentDescription = "添加食物",
-                                tint = AppColors.Diet
-                            )
-                        }
-                    }
-                )
-            }
-
-            if (state.entries.isEmpty() && !state.loading) {
-                item(key = "food_empty") { EmptyFoodCard { onAddFood(state.date) } }
-            }
-
-            state.groupedByMeal.forEach { (meal, entries) ->
-                item(key = "meal_${meal.name}") {
-                    MealHeader(meal = meal, totalKcal = entries.sumOf { it.macros.calories })
-                }
-                items(items = entries, key = { entry -> "food_${entry.id}" }) { entry ->
-                    DiaryEntryCard(
-                        entry = entry,
-                        onEdit = { startEditing(entry) },
-                        onDelete = { pendingDelete = entry }
-                    )
-                }
             }
         }
     }
@@ -455,8 +457,7 @@ private fun TodayActivityBlock(
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(modifier = Modifier.padding(Spacing.cardPadding)) {
-            if (loading) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            if (loading) {                Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(

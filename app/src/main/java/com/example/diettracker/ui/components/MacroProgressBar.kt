@@ -57,12 +57,13 @@ object ProgressColors {
 }
 
 /**
- * The intake block: ring chart, four progress bars (three macros plus total
- * calories) and the energy ledger row.
+ * 首页的「当天摄入」卡片。
  *
- * The energy figures used to live in a separate "热量账本" card; they are folded in
- * here so the day reads as one block. Workout burn stays display-only and is never
- * added back to the remaining allowance.
+ * 内容（用户要求精简后）：
+ *  - 三条宏量进度条：碳水 / 蛋白质 / 脂肪
+ *  - 三个数字：饮食摄入 / 运动消耗 / 总热量
+ *
+ * 去掉了大圆环与图例（太占地方）。运动消耗**只作参考**，永远不会减掉可摄入额度。
  */
 @Composable
 fun IntakeSummaryCard(
@@ -86,8 +87,7 @@ fun IntakeSummaryCard(
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = "${Math.round(state.consumedCalories)} kcal / " +
-                            "${Math.round(state.goalCalories)} kcal",
+                        text = "目标 ${Math.round(state.goalCalories)} kcal",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -97,90 +97,88 @@ fun IntakeSummaryCard(
 
             Spacer(Modifier.height(12.dp))
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                MacroRingChart(
-                    consumed = state.consumed,
-                    goal = state.goal,
-                    centerTitle = "${Math.round(overallPercent(state.consumed, state.goal) * 100)}%",
-                    centerSubtitle = "综合完成度"
-                )
-                Spacer(Modifier.width(20.dp))
-                MacroLegend(
-                    consumed = state.consumed,
-                    goal = state.goal,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(Modifier.height(14.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
-            Spacer(Modifier.height(12.dp))
-
             MacroProgressBar(
                 label = "碳水",
                 consumed = state.consumed.carbs,
                 goal = state.goal.carbs,
                 color = MacroColors.Carbs
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
             MacroProgressBar(
                 label = "蛋白质",
                 consumed = state.consumed.protein,
                 goal = state.goal.protein,
                 color = MacroColors.Protein
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
             MacroProgressBar(
                 label = "脂肪",
                 consumed = state.consumed.fat,
                 goal = state.goal.fat,
                 color = MacroColors.Fat
             )
-            Spacer(Modifier.height(12.dp))
-            MacroProgressBar(
-                label = "总热量",
-                consumed = state.consumedCalories,
-                goal = state.goalCalories,
-                color = MaterialTheme.colorScheme.primary,
-                unit = "kcal"
-            )
-
-            Spacer(Modifier.height(16.dp))
-            EnergyLedgerRow(energy = state.energy)
 
             Spacer(Modifier.height(14.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+            Spacer(Modifier.height(12.dp))
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                RemainingChip("碳水", state.remaining.carbs, MacroColors.Carbs, Modifier.weight(1f))
-                RemainingChip(
-                    "蛋白质",
-                    state.remaining.protein,
-                    MacroColors.Protein,
-                    Modifier.weight(1f)
+                IntakeMetric(
+                    label = "饮食摄入",
+                    value = Math.round(state.energy.intakeCalories).toString(),
+                    color = MacroColors.Calories
                 )
-                RemainingChip("脂肪", state.remaining.fat, MacroColors.Fat, Modifier.weight(1f))
-            }
-
-            if (state.energy.hasBurn) {
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = "运动消耗只作参考，不会自动加到可摄入额度里；" +
-                        "是否补回来由你自己决定。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                IntakeMetric(
+                    label = "运动消耗",
+                    value = Math.round(state.energy.burnedCalories).toString(),
+                    color = com.example.diettracker.ui.theme.AppColors.Sport
+                )
+                IntakeMetric(
+                    label = "总热量",
+                    value = Math.round(state.energy.netCalories).toString(),
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
         }
     }
 }
 
+/** 三个数字之一：标签 + 大号数值 + kcal。 */
+@Composable
+private fun IntakeMetric(
+    label: String,
+    value: String,
+    color: Color
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = color
+        )
+        Text(
+            text = "kcal",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
 /**
- * Intake / burn / net, as a compact row inside the intake card.
+ * 「饮食摄入 / 运动消耗 / 净热量」三格。
  *
- * The burn is a reference figure: it is deliberately not subtracted from the
- * remaining macro allowance.
+ * 从摄入卡片里挪出来，现在放在「今日运动」栏里：消耗与净热量跟运动放一起更合理。
+ * 运动消耗**只作参考**，永远不会减掉可摄入额度。
  */
 @Composable
 fun EnergyLedgerRow(
