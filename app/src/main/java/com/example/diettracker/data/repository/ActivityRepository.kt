@@ -3,13 +3,16 @@ package com.example.diettracker.data.repository
 import com.example.diettracker.data.db.ActivityLogEntity
 import com.example.diettracker.data.db.AppDatabase
 import com.example.diettracker.data.db.CustomExerciseEntity
+import com.example.diettracker.data.db.CustomSportEntity
 import com.example.diettracker.data.db.CustomStretchEntity
 import com.example.diettracker.data.db.ExerciseLogEntity
+import com.example.diettracker.data.db.PersonalRecordEntity
 import com.example.diettracker.data.db.UserProfileEntity
 import com.example.diettracker.data.model.ActivityLevel
 import com.example.diettracker.data.model.GoalMode
 import com.example.diettracker.data.model.Sex
 import com.example.diettracker.domain.ExerciseLibrary
+import com.example.diettracker.domain.SportCategory
 import com.example.diettracker.domain.SportInfo
 import com.example.diettracker.domain.SportLibrary
 import com.example.diettracker.domain.StretchGuide
@@ -40,6 +43,93 @@ class ActivityRepository(private val db: AppDatabase) {
     private val exerciseLogDao = db.exerciseLogDao()
     private val customExerciseDao = db.customExerciseDao()
     private val customStretchDao = db.customStretchDao()
+    private val dayNoteDao = db.dayNoteDao()
+    private val recordDao = db.personalRecordDao()
+    private val customSportDao = db.customSportDao()
+
+    // ------------------------------------------------------- 每日备注名
+
+    /** 某一天的名字（「减脂日」），没起名字时返回空串。 */
+    fun observeDayLabel(date: String): Flow<String> =
+        dayNoteDao.observe(date).map { it?.label.orEmpty() }
+
+    suspend fun getDayLabel(date: String): String = dayNoteDao.get(date)?.label.orEmpty()
+
+    /** 给某一天起名字；传空串就是清掉名字。 */
+    suspend fun setDayLabel(date: String, label: String): Result<Unit> = runCatching {
+        val trimmed = label.trim().take(MAX_DAY_LABEL)
+        if (trimmed.isEmpty()) {
+            dayNoteDao.delete(date)
+        } else {
+            dayNoteDao.setLabel(date, trimmed, System.currentTimeMillis())
+        }
+    }
+
+    /** 一段日期区间内的名字，月历用。 */
+    fun observeDayLabels(from: String, to: String): Flow<Map<String, String>> =
+        dayNoteDao.observeBetween(from, to).map { list ->
+            list.filter { it.label.isNotBlank() }.associate { it.date to it.label }
+        }
+
+    suspend fun getDayLabels(from: String, to: String): Map<String, String> =
+        dayNoteDao.getBetween(from, to)
+            .filter { it.label.isNotBlank() }
+            .associate { it.date to it.label }
+
+    /** 一段日期区间内每天的运动汇总（项数 + 消耗），月历格子用。 */
+    suspend fun dailyActivityTotals(from: String, to: String): Map<String, Pair<Int, Double>> =
+        activityDao.dailyTotalsBetween(from, to)
+            .associate { it.date to (it.activityCount to it.kcal) }
+
+    // --------------------------------------------------------- 个人纪录
+
+    /** 全部 PR，新的在前。 */
+    fun observeRecords(): Flow<List<PersonalRecordEntity>> = recordDao.observeAll()
+
+    suspend fun getRecords(): List<PersonalRecordEntity> = recordDao.getAll()
+
+    /** 某个动作的全部 PR 历史。 */
+    fun observeRecordsFor(exerciseName: String): Flow<List<PersonalRecordEntity>> =
+        recordDao.observeForExercise(exerciseName)
+
+    /** 某个动作当前的最好成绩（重量优先，同重量比次数）。 */
+    suspend fun bestRecord(exerciseName: String): PersonalRecordEntity? =
+        recordDao.bestFor(exerciseName)
+
+    suspend fun addRecord(
+        exerciseName: String,
+        weightKg: Double,
+        reps: Int,
+        date: String,
+        note: String = ""
+    ): Result<Unit> = runCatching {
+        val name = exerciseName.trim()
+        require(name.isNotEmpty()) { "请选择动作" }
+        require(weightKg > 0.0) { "重量要大于 0" }
+        require(reps in 1..100) { "次数请填 1-100" }
+        recordDao.insert(
+            PersonalRecordEntity(
+                exerciseName = name,
+                weightKg = weightKg,
+                reps = reps,
+                date = date,
+                note = note.trim().take(60)
+            )
+        )
+    }
+
+    suspend fun deleteRecord(id: Long): Result<Unit> = runCatching { recordDao.deleteById(id) }
+
+    /**
+     * 判断某个重量是否算「新 PR」——用于保存动作卡片时的提示。
+     * 只在该动作已有 PR 且新重量更大时返回 true；没有 PR 时不打扰用户。
+     */
+    suspend fun isNewRecord(exerciseName: String, weightKg: Double, reps: Int): Boolean {
+        if (weightKg <= 0.0) return false
+        val best = recordDao.bestFor(exerciseName) ?: return true
+        if (weightKg > best.weightKg) return true
+        return weightKg == best.weightKg && reps > best.reps
+    }
 
     // ------------------------------------------------------------- 身体数据
 
@@ -65,11 +155,62 @@ class ActivityRepository(private val db: AppDatabase) {
 
     // ------------------------------------------------------------- 运动库
 
-    /** 内置运动库，按分组返回。 */
-    fun sportGroups(): List<Pair<com.example.diettracker.domain.SportCategory, List<SportInfo>>> =
-        SportLibrary.grouped()
+    /** 内置运动库 + 用户自建，按分组返回。 */
+    suspend fun sportGroups(): List<Pair<SportCategory, List<SportInfo>>> =
+        SportLibrary.groupedWithCustom(customSportDao.getAll())
 
-    fun findSport(key: String): SportInfo? = SportLibrary.find(key)
+    /** 流式版本，自建运动变化时能刷新选择器。 */
+    fun observeSportGroups(): Flow<List<Pair<SportCategory, List<SportInfo>>>> =
+        customSportDao.observeAll().map { custom ->
+            SportLibrary.groupedWithCustom(custom)
+        }
+
+    /**
+     * 按 key 找运动项目：内置的查 `SportLibrary`，自建的按 `CUSTOM_<id>` 查库。
+     */
+    suspend fun findSport(key: String): SportInfo? {
+        SportLibrary.find(key)?.let { return it }
+        if (!CustomSportEntity.isCustomKey(key)) return null
+        val id = CustomSportEntity.idFromKey(key) ?: return null
+        val entity = customSportDao.getById(id) ?: return null
+        return SportInfo(
+            key = entity.key,
+            name = entity.name,
+            met = entity.met,
+            defaultMinutes = entity.defaultMinutes,
+            category = SportCategory.CUSTOM,
+            note = "自建"
+        )
+    }
+
+    suspend fun getCustomSports(): List<CustomSportEntity> = customSportDao.getAll()
+
+    /** 新建一个自建运动。 */
+    suspend fun addCustomSport(
+        name: String,
+        met: Double,
+        defaultMinutes: Int
+    ): Result<Long> = runCatching {
+        val trimmed = name.trim()
+        require(trimmed.isNotEmpty()) { "请填运动名称" }
+        require(met in CustomSportEntity.MIN_MET..CustomSportEntity.MAX_MET) {
+            "MET 请填 ${CustomSportEntity.MIN_MET}-${CustomSportEntity.MAX_MET}"
+        }
+        require(defaultMinutes in CustomSportEntity.MIN_MINUTES..CustomSportEntity.MAX_MINUTES) {
+            "时长请填 ${CustomSportEntity.MIN_MINUTES}-${CustomSportEntity.MAX_MINUTES} 分钟"
+        }
+        require(customSportDao.countWithName(trimmed) == 0) { "已经有同名的自建运动了" }
+        customSportDao.insert(
+            CustomSportEntity(
+                name = trimmed,
+                met = met,
+                defaultMinutes = defaultMinutes
+            )
+        )
+    }
+
+    suspend fun deleteCustomSport(id: Long): Result<Unit> =
+        runCatching { customSportDao.deleteById(id) }
 
     /** 按 MET 估算热量。 */
     fun estimateKcal(met: Double, weightKg: Double, minutes: Int): Double =
@@ -103,7 +244,7 @@ class ActivityRepository(private val db: AppDatabase) {
         sportKey: String,
         durationMinutes: Int? = null
     ): Result<Long> = runCatching {
-        val sport = SportLibrary.find(sportKey) ?: error("找不到这个运动项目")
+        val sport = findSport(sportKey) ?: error("找不到这个运动项目")
         val minutes = (durationMinutes ?: sport.defaultMinutes).coerceIn(1, 600)
         val weight = currentWeightKg()
         activityDao.insert(
@@ -198,8 +339,8 @@ class ActivityRepository(private val db: AppDatabase) {
     /**
      * 加一个动作卡片。
      *
-     * 重量 / 组数 / 次数没填时，自动用这个动作**上一次**的记录作为默认值；
-     * 从没练过就用 0kg / 3 组 / 10 次。
+     * 默认值是**最大重量 / 1 组 / 1 次**（用户要求）：新动作先按"冲一次极限"来填，
+     * 想练多次再自己往上调。这个动作**以前记过**的话，沿用上次的值更方便。
      */
     suspend fun addExercise(
         activityId: Long,
@@ -212,14 +353,15 @@ class ActivityRepository(private val db: AppDatabase) {
         val name = exerciseName.trim()
         require(name.isNotEmpty()) { "动作名称不能为空" }
         val last = exerciseLogDao.previousForExercise(name, date)
+        // 有历史就沿用上次；没有则按「最大重量 / 1 组 / 1 次」起步。
         exerciseLogDao.insert(
             ExerciseLogEntity(
                 activityId = activityId,
                 date = date,
                 exerciseName = name,
-                weightKg = weightKg ?: last?.weightKg ?: 0.0,
-                sets = sets ?: last?.sets ?: DEFAULT_SETS,
-                reps = reps ?: last?.reps ?: DEFAULT_REPS,
+                weightKg = weightKg ?: last?.weightKg ?: DEFAULT_WEIGHT_KG,
+                sets = sets ?: last?.sets ?: DEFAULT_SETS_SINGLE,
+                reps = reps ?: last?.reps ?: DEFAULT_REPS_SINGLE,
                 position = exerciseLogDao.countForActivity(activityId)
             )
         )
@@ -321,10 +463,23 @@ class ActivityRepository(private val db: AppDatabase) {
     suspend fun sexOf(profile: UserProfileEntity): Sex = Sex.fromStorage(profile.sex)
 
     companion object {
+        /**
+         * 新动作卡片的默认值：**最大重量 / 1 组 / 1 次**。
+         *
+         * 用户的用法是「先按冲极限记一次」，所以默认组数次数都是 1；重量给一个常见
+         * 起始值（20kg），省得从 0 一路拖上去。真正练多次时在滚轮上调。
+         */
+        const val DEFAULT_WEIGHT_KG = 20.0
+        const val DEFAULT_SETS_SINGLE = 1
+        const val DEFAULT_REPS_SINGLE = 1
+
+        /** 旧的批量默认值，保留给「恢复默认」之类的场景。 */
         const val DEFAULT_SETS = 3
         const val DEFAULT_REPS = 10
         const val MAX_SETS = 20
         const val MAX_REPS = 100
+        /** 每日名字最多几个字。 */
+        const val MAX_DAY_LABEL = 8
     }
 }
 

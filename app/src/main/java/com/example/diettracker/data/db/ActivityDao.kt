@@ -53,7 +53,31 @@ interface ActivityLogDao {
 
     @Query("DELETE FROM activity_logs WHERE date = :date")
     suspend fun deleteByDate(date: String)
+
+    /**
+     * 月历用：一段区间内，每天有几项运动、合计消耗多少。
+     *
+     * `date` 要加反引号并显式起别名——它是 SQLite 的内建函数名，裸写会被当作函数。
+     */
+    @Query(
+        """
+        SELECT `date` AS date,
+               COUNT(*) AS activityCount,
+               COALESCE(SUM(burned_kcal), 0.0) AS kcal
+        FROM activity_logs
+        WHERE `date` BETWEEN :from AND :to
+        GROUP BY `date`
+        """
+    )
+    suspend fun dailyTotalsBetween(from: String, to: String): List<DailyActivityTotal>
 }
+
+/** 某一天的运动汇总（月历格子用）。 */
+data class DailyActivityTotal(
+    val date: String,
+    val activityCount: Int,
+    val kcal: Double
+)
 
 /** 撸铁里的动作卡片：动作名 + 重量 + 组数 + 次数。 */
 @Dao

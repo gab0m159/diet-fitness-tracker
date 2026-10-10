@@ -66,14 +66,53 @@ class SportRulesTest {
     }
 
     @Test
-    fun `每个分组都非空`() {
+    fun `内置分组都非空且CUSTOM组默认不存在`() {
+        // 内置项覆盖四个分组；CUSTOM 分组只在用户自建了运动时才有内容，
+        // 所以 grouped() 不会返回它。
         SportLibrary.grouped().forEach { (category, list) ->
             assertTrue("${category.label} 不应为空", list.isNotEmpty())
+            assertTrue("grouped() 不应包含 CUSTOM 组", category != SportCategory.CUSTOM)
         }
         assertEquals(13, SportLibrary.all.count { it.category == SportCategory.CARDIO })
         assertEquals(6, SportLibrary.all.count { it.category == SportCategory.BALL })
         assertEquals(6, SportLibrary.all.count { it.category == SportCategory.CLASS })
         assertEquals(8, SportLibrary.all.count { it.category == SportCategory.STRENGTH })
+    }
+
+    @Test
+    fun `自建运动会被并成最后一组`() {
+        val custom = listOf(
+            com.example.diettracker.data.db.CustomSportEntity(
+                id = 7L,
+                name = "划船机（自家）",
+                met = 6.0,
+                defaultMinutes = 25
+            )
+        )
+        val groups = SportLibrary.groupedWithCustom(custom)
+        val last = groups.last()
+        assertEquals(SportCategory.CUSTOM, last.first)
+        assertEquals(1, last.second.size)
+        assertEquals("划船机（自家）", last.second.first().name)
+        // key 要能和内置项区分开
+        assertEquals("CUSTOM_7", last.second.first().key)
+        assertTrue(com.example.diettracker.data.db.CustomSportEntity.isCustomKey("CUSTOM_7"))
+        assertEquals(7L, com.example.diettracker.data.db.CustomSportEntity.idFromKey("CUSTOM_7"))
+        assertTrue(groups.size == SportCategory.entries.size)
+    }
+
+    @Test
+    fun `没有自建运动时不产生空分组`() {
+        // grouped() 会过滤空组：内置项不覆盖 CUSTOM，所以只有四个组；
+        // groupedWithCustom(空) 也应保持四个组，不能多出一个空的「我创建的」。
+        val builtIn = SportLibrary.grouped()
+        assertEquals(4, builtIn.size)
+        assertTrue(builtIn.none { it.first == SportCategory.CUSTOM })
+        assertTrue(builtIn.all { it.second.isNotEmpty() })
+
+        val withEmptyCustom = SportLibrary.groupedWithCustom(emptyList())
+        assertEquals(4, withEmptyCustom.size)
+        assertTrue(withEmptyCustom.none { it.first == SportCategory.CUSTOM })
     }
 
     @Test

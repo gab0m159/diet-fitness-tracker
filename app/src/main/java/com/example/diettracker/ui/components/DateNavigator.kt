@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -29,12 +30,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.diettracker.ui.theme.AppColors
 import com.example.diettracker.util.DateUtils
 
 /**
- * The date strip at the top of the diary screen: previous / next day, a tappable
- * date that opens the picker, and a "回到今天" shortcut when off-today.
+ * 日记页顶部的日期条：前一天 / 后一天、可点的日期（打开月历）、回到今天。
+ *
+ * [dayLabel] 是用户给这天起的名字（「减脂日」），有名字时显示在日期下方；
+ * [onEditLabel] 让用户给这天起名或改名（点名字区域触发）。
  */
 @Composable
 fun DateNavigator(
@@ -43,7 +48,9 @@ fun DateNavigator(
     onNextDay: () -> Unit,
     onPickDate: () -> Unit,
     onToday: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    dayLabel: String = "",
+    onEditLabel: () -> Unit = {}
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -96,9 +103,28 @@ fun DateNavigator(
                 )
             }
 
+            // 名字按钮：有名字显示名字，没名字显示「起名」提示
+            TextButton(
+                onClick = onEditLabel,
+                modifier = Modifier.widthIn(min = 62.dp)
+            ) {
+                Text(
+                    text = dayLabel.ifBlank { "起名" },
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (dayLabel.isBlank()) FontWeight.Normal else FontWeight.SemiBold,
+                    color = if (dayLabel.isBlank()) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        AppColors.Stretch
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
             if (DateUtils.isToday(date)) {
-                // Reserve the same width as the button below so the date stays centred.
-                Box(Modifier.width(64.dp)) {
+                // 与下面的按钮同宽，保证日期居中。
+                Box(Modifier.width(52.dp)) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -108,7 +134,7 @@ fun DateNavigator(
                     )
                 }
             } else {
-                TextButton(onClick = onToday, modifier = Modifier.width(64.dp)) {
+                TextButton(onClick = onToday, modifier = Modifier.width(52.dp)) {
                     Text("今天", style = MaterialTheme.typography.labelMedium)
                 }
             }

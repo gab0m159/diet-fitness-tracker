@@ -35,7 +35,10 @@ enum class SportCategory(val label: String) {
     CARDIO("有氧耐力"),
     BALL("球类"),
     CLASS("操课"),
-    STRENGTH("力量与其它")
+    STRENGTH("力量与其它"),
+
+    /** 用户自建的项目，排在最后一组。 */
+    CUSTOM("我创建的")
 }
 
 /**
@@ -100,16 +103,46 @@ object SportLibrary {
         SportInfo("HOUSEWORK", "做家务", 3.3, 30, SportCategory.STRENGTH)
     )
 
-    /** 按分组给运动库页面用。 */
+    /**
+     * 按分组给运动库页面用（只含内置项）。
+     *
+     * 只返回**有内容**的组：内置项不覆盖 `CUSTOM`（那是用户自建专用的分组），
+     * 所以必须过滤掉空组，否则页面会渲染出一个空的「我创建的」标题。
+     */
     fun grouped(): List<Pair<SportCategory, List<SportInfo>>> =
-        SportCategory.entries.map { category ->
-            category to all.filter { it.category == category }
-        }
+        SportCategory.entries
+            .filter { it != SportCategory.CUSTOM }
+            .map { category -> category to all.filter { it.category == category } }
+            .filter { it.second.isNotEmpty() }
 
     fun find(key: String): SportInfo? = all.firstOrNull { it.key == key }
 
     /** 撸铁那一项。 */
     val strength: SportInfo get() = find(STRENGTH_KEY) ?: all.last()
+
+    /**
+     * 把用户自建的运动并进分组结果，新增一组「我创建的」放在**最后**。
+     *
+     * 内置项在前：它们是大多数人的常用项，自建项通常只占少数。分开放也更清楚
+     * 「哪些能删、哪些不能删」。没有自建项时**不会**产生空的 CUSTOM 组。
+     */
+    fun groupedWithCustom(
+        custom: List<com.example.diettracker.data.db.CustomSportEntity>
+    ): List<Pair<SportCategory, List<SportInfo>>> {
+        val base = grouped()
+        if (custom.isEmpty()) return base
+        val customInfos = custom.map { entity ->
+            SportInfo(
+                key = entity.key,
+                name = entity.name,
+                met = entity.met,
+                defaultMinutes = entity.defaultMinutes,
+                category = SportCategory.CUSTOM,
+                note = "自建"
+            )
+        }
+        return base + (SportCategory.CUSTOM to customInfos)
+    }
 
     /**
      * 按 MET 估算热量：`MET × 体重(kg) × 时长(小时)`。

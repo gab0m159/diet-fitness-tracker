@@ -21,6 +21,9 @@ object Routes {
     /** 每日目标编辑。 */
     const val GOALS = "goals"
 
+    /** 我的 PR（个人最大重量纪录）。 */
+    const val RECORDS = "records"
+
     /** 新建 / 编辑食物。 */
     const val FOOD_EDITOR = "food_editor?foodId={foodId}"
 

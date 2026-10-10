@@ -57,6 +57,7 @@ import com.example.diettracker.data.db.ExerciseLogEntity
 import com.example.diettracker.data.model.DiaryEntry
 import com.example.diettracker.data.model.MealType
 import com.example.diettracker.data.repository.ActivityRepository
+import com.example.diettracker.data.repository.DietRepository
 import com.example.diettracker.domain.SportLibrary
 import com.example.diettracker.ui.components.BurnOverrideDialog
 import com.example.diettracker.ui.components.ConfirmDialog
@@ -67,6 +68,7 @@ import com.example.diettracker.ui.components.EditEntrySheet
 import com.example.diettracker.ui.components.ExerciseEditorDialog
 import com.example.diettracker.ui.components.IntakeSummaryCard
 import com.example.diettracker.ui.components.MacroChip
+import com.example.diettracker.ui.components.MonthCalendarDialog
 import com.example.diettracker.ui.components.SectionHeader
 import com.example.diettracker.ui.components.SportActivityCard
 import com.example.diettracker.ui.components.SportPickerDialog
@@ -76,6 +78,7 @@ import com.example.diettracker.ui.theme.MacroColors
 import com.example.diettracker.ui.theme.Spacing
 import com.example.diettracker.ui.viewmodel.ActivityCard
 import com.example.diettracker.ui.viewmodel.ActivityViewModel
+import com.example.diettracker.ui.viewmodel.CalendarViewModel
 import com.example.diettracker.ui.viewmodel.DiaryViewModel
 import com.example.diettracker.util.DateUtils
 import kotlinx.coroutines.launch
@@ -96,6 +99,7 @@ import kotlinx.coroutines.launch
 fun TodayScreen(
     viewModel: DiaryViewModel,
     activityRepository: ActivityRepository,
+    dietRepository: DietRepository,
     onAddFood: (String) -> Unit,
     onOpenGoals: () -> Unit
 ) {
@@ -107,6 +111,11 @@ fun TodayScreen(
     )
     val activityState by activityViewModel.ui.collectAsStateWithLifecycle()
     val bodyWeightKg = activityState.bodyWeightKg
+
+    val calendarViewModel: CalendarViewModel = viewModel(
+        factory = CalendarViewModel.factory(dietRepository, activityRepository)
+    )
+    val calendarState by calendarViewModel.ui.collectAsStateWithLifecycle()
 
     var pendingDelete by remember { mutableStateOf<DiaryEntry?>(null) }
     var confirmClearDay by remember { mutableStateOf(false) }
@@ -122,6 +131,10 @@ fun TodayScreen(
     var exerciseTarget by remember { mutableStateOf<ExerciseLogEntity?>(null) }
     var exercisePickerFor by remember { mutableStateOf<ActivityCard?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
+    var showCalendar by remember { mutableStateOf(false) }
+    var editingDayLabel by remember { mutableStateOf(false) }
+    /** 保存动作时如果破了纪录，弹这个提示。 */
+    var newRecordFor by remember { mutableStateOf<ExerciseLogEntity?>(null) }
     val scope = rememberCoroutineScope()
 
     fun startEditing(entry: DiaryEntry) {
@@ -181,8 +194,10 @@ fun TodayScreen(
                     date = state.date,
                     onPreviousDay = viewModel::previousDay,
                     onNextDay = viewModel::nextDay,
-                    onPickDate = { showDatePicker = true },
-                    onToday = viewModel::goToToday
+                    onPickDate = { showCalendar = true },
+                    onToday = viewModel::goToToday,
+                    dayLabel = calendarState.overviews[state.date]?.label.orEmpty(),
+                    onEditLabel = { editingDayLabel = true }
                 )
             }
 
@@ -343,8 +358,65 @@ fun TodayScreen(
             onConfirm = { weight, sets, reps ->
                 activityViewModel.updateExercise(exercise.id, weight, sets, reps)
                 exerciseTarget = null
+                // 破了纪录就提示要不要记进「我的 PR」。
+                scope.launch {
+                    if (activityRepository.isNewRecord(exercise.exerciseName, weight, reps)) {
+                        newRecordFor = exercise.copy(weightKg = weight, reps = reps)
+                    }
+                }
             },
             onDismiss = { exerciseTarget = null }
+        )
+    }
+
+    // 月历总览：看历史 + 选日期
+    if (showCalendar) {
+        MonthCalendarDialog(
+            month = calendarState.month,
+            today = DateUtils.today(),
+            selectedDate = state.date,
+            overviews = calendarState.overviews,
+            onMonthChange = { calendarViewModel.setMonth(it) },
+            onPickDate = { date ->
+                viewModel.setDate(date)
+                showCalendar = false
+            },
+            onDismiss = { showCalendar = false }
+        )
+    }
+
+    // 给这天起名字
+    if (editingDayLabel) {
+        DayLabelDialog(
+            date = state.date,
+            current = calendarState.overviews[state.date]?.label.orEmpty(),
+            onConfirm = { label ->
+                calendarViewModel.setDayLabel(state.date, label)
+                editingDayLabel = false
+            },
+            onDismiss = { editingDayLabel = false }
+        )
+    }
+
+    // 破纪录提示
+    newRecordFor?.let { exercise ->
+        ConfirmDialog(
+            title = "新纪录！",
+            message = "${exercise.exerciseName}　${trimKg(exercise.weightKg)}kg × ${exercise.reps} 次\n\n" +
+                "要记进「我的 PR」吗？（也可以在「我的 → 我的 PR」里补记）",
+            confirmLabel = "记下来",
+            onConfirm = {
+                scope.launch {
+                    activityRepository.addRecord(
+                        exerciseName = exercise.exerciseName,
+                        weightKg = exercise.weightKg,
+                        reps = exercise.reps,
+                        date = state.date
+                    )
+                    newRecordFor = null
+                }
+            },
+            onDismiss = { newRecordFor = null }
         )
     }
 
@@ -487,9 +559,33 @@ private fun TodayActivityBlock(
                 return@Card
             }
 
-            // 上段：运动
-            SubSectionLabel(text = "运动", accent = AppColors.Sport)
-            Spacer(Modifier.height(8.dp))
+            // 有撸铁时，把「撸铁」整段提到最上面并高亮——用户最常练的就是它，
+            // 其余有氧项目排在下面。
+            val hasStrength = strengthCards.isNotEmpty()
+            if (hasStrength) {
+                SubSectionLabel(text = "撸铁", accent = AppColors.Strength)
+                Spacer(Modifier.height(8.dp))
+                strengthCards.forEach { card ->
+                    StrengthActivityCard(
+                        card = card,
+                        highlighted = true,
+                        onEditDuration = { onEditDuration(card) },
+                        onEditBurn = { onEditBurn(card) },
+                        onDelete = { onDelete(card) },
+                        onAddExercise = { onAddExercise(card) },
+                        onEditExercise = onEditExercise,
+                        onDeleteExercise = onDeleteExercise
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+                Spacer(Modifier.height(4.dp))
+                SubSectionLabel(text = "运动", accent = AppColors.Sport)
+                Spacer(Modifier.height(8.dp))
+            } else {
+                SubSectionLabel(text = "运动", accent = AppColors.Sport)
+                Spacer(Modifier.height(8.dp))
+            }
+
             if (sportCards.isEmpty()) {
                 Text(
                     text = "还没有有氧 / 操课记录",
@@ -508,29 +604,15 @@ private fun TodayActivityBlock(
                 }
             }
 
-            Spacer(Modifier.height(6.dp))
-            // 下段：撸铁
-            SubSectionLabel(text = "撸铁", accent = AppColors.Strength)
-            Spacer(Modifier.height(8.dp))
-            if (strengthCards.isEmpty()) {
+            if (!hasStrength) {
+                Spacer(Modifier.height(6.dp))
+                SubSectionLabel(text = "撸铁", accent = AppColors.Strength)
+                Spacer(Modifier.height(8.dp))
                 Text(
                     text = "今天还没练力量。点右上角「+」选「撸铁」，就能往里加动作。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            } else {
-                strengthCards.forEach { card ->
-                    StrengthActivityCard(
-                        card = card,
-                        onEditDuration = { onEditDuration(card) },
-                        onEditBurn = { onEditBurn(card) },
-                        onDelete = { onDelete(card) },
-                        onAddExercise = { onAddExercise(card) },
-                        onEditExercise = onEditExercise,
-                        onDeleteExercise = onDeleteExercise
-                    )
-                    Spacer(Modifier.height(8.dp))
-                }
             }
 
             Spacer(Modifier.height(4.dp))
@@ -563,6 +645,70 @@ private fun SubSectionLabel(text: String, accent: Color) {
             color = accent
         )
     }
+}
+
+/** 给某一天起名字（「减脂日」「练胸日」）。 */
+@Composable
+private fun DayLabelDialog(
+    date: String,
+    current: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var text by remember { mutableStateOf(current) }
+    val suggestions = listOf("减脂日", "增肌日", "高碳日", "低碳日", "练胸日", "练背日", "练腿日", "休息日")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("给 ${DateUtils.displayDate(date)} 起名") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it.take(8) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("名字") },
+                    placeholder = { Text("例如：减脂日") },
+                    singleLine = true,
+                    supportingText = { Text("最多 8 个字，留空表示不起名") }
+                )
+                Spacer(Modifier.height(Spacing.itemGap))
+                Text("常用", style = MaterialTheme.typography.labelMedium)
+                Spacer(Modifier.height(6.dp))
+                suggestions.chunked(4).forEach { row ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    ) {
+                        row.forEach { s ->
+                            androidx.compose.material3.FilterChip(
+                                selected = text == s,
+                                onClick = { text = s },
+                                label = { Text(s, style = MaterialTheme.typography.labelSmall) }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }) { Text("保存") }
+        },
+        dismissButton = {
+            Row {
+                if (current.isNotBlank()) {
+                    TextButton(onClick = { onConfirm("") }) { Text("清除") }
+                }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        }
+    )
+}
+
+private fun trimKg(value: Double): String {
+    val rounded = Math.round(value * 100.0) / 100.0
+    return if (rounded == Math.floor(rounded)) rounded.toLong().toString()
+    else rounded.toString()
 }
 
 /** 选动作名的弹窗。 */

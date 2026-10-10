@@ -28,9 +28,11 @@ import com.example.diettracker.ui.screens.FoodBrowseScreen
 import com.example.diettracker.ui.screens.FoodEditorScreen
 import com.example.diettracker.ui.screens.GoalScreen
 import com.example.diettracker.ui.screens.LibraryScreen
+import com.example.diettracker.ui.screens.PersonalRecordScreen
 import com.example.diettracker.ui.screens.ProfileScreen
 import com.example.diettracker.ui.screens.TodayScreen
 import com.example.diettracker.ui.viewmodel.DiaryViewModel
+import com.example.diettracker.ui.viewmodel.PersonalRecordViewModel
 import com.example.diettracker.ui.viewmodel.ProfileViewModel
 
 /**
@@ -81,6 +83,7 @@ fun DietTrackerRoot(
                 TodayScreen(
                     viewModel = vm,
                     activityRepository = activityRepository,
+                    dietRepository = dietRepository,
                     onAddFood = { date -> navController.navigate(Routes.addEntry(date)) },
                     onOpenGoals = { navController.navigate(Routes.GOALS) }
                 )
@@ -128,7 +131,18 @@ fun DietTrackerRoot(
                     viewModel = viewModel(
                         factory = ProfileViewModel.factory(dietRepository, activityRepository)
                     ),
-                    onOpenGoals = { navController.navigate(Routes.GOALS) }
+                    onOpenGoals = { navController.navigate(Routes.GOALS) },
+                    onOpenRecords = { navController.navigate(Routes.RECORDS) }
+                )
+            }
+
+            // ---------------------------------------------------- 我的 PR
+            composable(Routes.RECORDS) {
+                PersonalRecordScreen(
+                    viewModel = viewModel(
+                        factory = PersonalRecordViewModel.factory(activityRepository)
+                    ),
+                    onBack = { navController.popBackStack() }
                 )
             }
 

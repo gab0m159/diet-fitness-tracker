@@ -1,6 +1,8 @@
 package com.example.diettracker.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +51,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.diettracker.data.db.ExerciseLogEntity
+import com.example.diettracker.domain.SportLibrary
 import com.example.diettracker.ui.theme.AppColors
 import com.example.diettracker.ui.theme.Spacing
 import com.example.diettracker.ui.viewmodel.ActivityCard
@@ -143,7 +146,8 @@ fun SportActivityCard(
 /**
  * 撸铁卡片：上面是「撸铁 + 时长 + 热量」，下面挂动作清单。
  *
- * 动作卡片就是 `动作名 / 重量 / 组数 / 次数` 四个值，全部单一值，不做逐组差异。
+ * [highlighted] 为真时加一圈橙色边框并把底色加重——今日运动里撸铁会被置顶并高亮，
+ * 让人一眼看到今天的主力训练。
  */
 @Composable
 fun StrengthActivityCard(
@@ -154,14 +158,31 @@ fun StrengthActivityCard(
     onAddExercise: () -> Unit,
     onEditExercise: (ExerciseLogEntity) -> Unit,
     onDeleteExercise: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    highlighted: Boolean = false
 ) {
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (highlighted) {
+                    Modifier.border(
+                        width = 2.dp,
+                        color = AppColors.Strength.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                } else {
+                    Modifier
+                }
+            ),
         colors = CardDefaults.cardColors(
-            containerColor = AppColors.StrengthSoft.copy(alpha = 0.6f)
+            containerColor = if (highlighted) {
+                AppColors.StrengthSoft
+            } else {
+                AppColors.StrengthSoft.copy(alpha = 0.6f)
+            }
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = if (highlighted) 2.dp else 0.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -295,7 +316,12 @@ private fun ExerciseLogRow(
     }
 }
 
-/** 选运动项目的弹窗：分组列表，每项显示默认时长与估算热量。 */
+/**
+ * 选运动项目的弹窗。
+ *
+ * **撸铁单独橙色置顶**：它是最常用的项目，而且能往下挂动作卡片，所以不做成
+ * 分组里的一项，而是提到最上面、整行用橙色高亮。其余项目按分组排在后面。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SportPickerDialog(
@@ -305,12 +331,37 @@ fun SportPickerDialog(
     onDismiss: () -> Unit,
     hasStrengthAlready: Boolean = false
 ) {
+    // 把撸铁从分组里摘出来，单独置顶。
+    val strengthRow = groups.asSequence()
+        .flatMap { it.second.asSequence() }
+        .firstOrNull { it.key == SportLibrary.STRENGTH_KEY }
+    val restGroups = groups.map { (category, rows) ->
+        category to rows.filterNot { it.key == SportLibrary.STRENGTH_KEY }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            LazyColumn(modifier = Modifier.height(420.dp)) {
-                groups.forEach { (category, rows) ->
+            LazyColumn(
+                modifier = Modifier.height(430.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                // ---- 撸铁：置顶 + 橙色高亮 ----
+                if (strengthRow != null) {
+                    item(key = "strength_pinned") {
+                        StrengthPinnedRow(
+                            row = strengthRow,
+                            disabled = hasStrengthAlready,
+                            onClick = { onPick(strengthRow) }
+                        )
+                    }
+                    item(key = "divider") {
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
+
+                restGroups.forEach { (category, rows) ->
                     if (rows.isEmpty()) return@forEach
                     item(key = "h_${category.name}") {
                         Text(
@@ -318,17 +369,11 @@ fun SportPickerDialog(
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 10.dp, bottom = 6.dp)
+                            modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
                         )
                     }
                     items(items = rows, key = { it.key }) { row ->
-                        SportPickerRow(
-                            row = row,
-                            disabled = row.key ==
-                                com.example.diettracker.domain.SportLibrary.STRENGTH_KEY &&
-                                hasStrengthAlready,
-                            onClick = { onPick(row) }
-                        )
+                        SportPickerRow(row = row, disabled = false, onClick = { onPick(row) })
                     }
                 }
             }
@@ -337,6 +382,86 @@ fun SportPickerDialog(
             TextButton(onClick = onDismiss) { Text("取消") }
         }
     )
+}
+
+/** 置顶的撸铁行：橙色底 + 橙色边框，一眼能认出来。 */
+@Composable
+private fun StrengthPinnedRow(
+    row: SportRow,
+    disabled: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                if (disabled) {
+                    AppColors.StrengthSoft.copy(alpha = 0.45f)
+                } else {
+                    AppColors.StrengthSoft
+                }
+            )
+            .border(
+                width = 1.5.dp,
+                color = AppColors.Strength.copy(alpha = if (disabled) 0.3f else 0.6f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clickable(enabled = !disabled, onClick = onClick)
+            .padding(vertical = 11.dp, horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(AppColors.Strength.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Filled.FitnessCenter,
+                contentDescription = null,
+                tint = AppColors.Strength,
+                modifier = Modifier.size(19.dp)
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = row.name,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = AppColors.Strength
+            )
+            Text(
+                text = buildString {
+                    append("可加动作 · ")
+                    append(row.defaultLabel)
+                    append(" · ")
+                    append(row.metLabel)
+                    if (disabled) append("（今天已有）")
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Text(
+            text = row.kcalLabel,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = AppColors.Strength
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "添加",
+            style = MaterialTheme.typography.labelLarge,
+            color = if (disabled) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                AppColors.Strength
+            }
+        )
+    }
 }
 
 @Composable

@@ -113,6 +113,26 @@ class ActivityViewModel(
                 _ui.update { it.copy(bodyWeightKg = bodyWeightKg) }
             }
         }
+        // 自建运动变化时刷新选择器。
+        viewModelScope.launch {
+            repository.observeSportGroups().collect { groups: List<Pair<SportCategory, List<SportInfo>>> ->
+                val rows: List<Pair<SportCategory, List<SportRow>>> = groups.map { pair ->
+                    val category: SportCategory = pair.first
+                    val list: List<SportInfo> = pair.second
+                    category to list.map { info ->
+                        SportRow(
+                            info = info,
+                            estimatedKcal = repository.estimateKcal(
+                                info.met,
+                                bodyWeightKg,
+                                info.defaultMinutes
+                            )
+                        )
+                    }
+                }
+                _ui.update { it.copy(sportGroups = rows) }
+            }
+        }
         // 动作库随时可能新增自建动作，持续订阅，保证「加动作」里立刻能看到。
         viewModelScope.launch {
             repository.observeCustomExercises().collect {
@@ -160,7 +180,8 @@ class ActivityViewModel(
     }
 
     private suspend fun refreshSportLibrary() {
-        val rows = repository.sportGroups().map { (category, list) ->
+        val groups = repository.sportGroups()
+        val rows = groups.map { (category, list) ->
             category to list.map { info ->
                 SportRow(
                     info = info,
@@ -173,6 +194,37 @@ class ActivityViewModel(
             }
         }
         _ui.update { it.copy(sportGroups = rows) }
+    }
+
+    // ------------------------------------------------------- 自建运动
+
+    /** 新建一个自建运动（名称 / MET / 默认时长），成功后刷新选择器。 */
+    fun addCustomSport(name: String, met: Double, defaultMinutes: Int) {
+        viewModelScope.launch {
+            repository.addCustomSport(name, met, defaultMinutes).fold(
+                onSuccess = {
+                    _ui.update { it.copy(message = "已添加运动「${name.trim()}」") }
+                    refreshSportLibrary()
+                },
+                onFailure = { e ->
+                    _ui.update { it.copy(error = e.message ?: "添加失败") }
+                }
+            )
+        }
+    }
+
+    fun deleteCustomSport(id: Long) {
+        viewModelScope.launch {
+            repository.deleteCustomSport(id).fold(
+                onSuccess = {
+                    _ui.update { it.copy(message = "已删除自建运动") }
+                    refreshSportLibrary()
+                },
+                onFailure = { e ->
+                    _ui.update { it.copy(error = e.message ?: "删除失败") }
+                }
+            )
+        }
     }
 
     private suspend fun refreshExerciseNames() {

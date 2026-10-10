@@ -307,6 +307,16 @@ class DietRepository(private val db: AppDatabase) {
 
     suspend fun getBurnedKcal(date: String): Double =
         db.activityLogDao().getBurnedKcal(date)
+
+    // ------------------------------------------------------------ 月历
+
+    /**
+     * 一段日期区间内每天的饮食汇总（条数 + 热量），月历格子用。
+     * 热量算法与 DiaryEntryEntity 的显示逻辑一致：按份计的用变体值，否则按每 100g 反算。
+     */
+    suspend fun dailyEntryTotals(from: String, to: String): Map<String, Pair<Int, Double>> =
+        entryDao.dailyTotalsBetween(from, to)
+            .associate { it.date to (it.entryCount to it.kcal) }
 }
 
 /** A day's macro totals plus how many entries produced them. */
