@@ -39,23 +39,31 @@ enum class ActivityLevel(
 }
 
 /**
- * The user's goal, which drives both the calorie adjustment and the
- * recommended macro split.
+ * 用户的训练目标，决定**每公斤体重的碳蛋脂克数**。
  *
- * @param calorieFactor multiplier applied to TDEE.
- * @param carbsPct/proteinPct/fatPct recommended share of total calories.
+ * v7 起宏量不再按热量百分比切，而是按体重直接给（见
+ * `NutritionCalculator.perKgTargets`）：
+ *
+ * | 模式 | 碳水 g/kg | 蛋白 g/kg | 脂肪 g/kg |
+ * |------|-----------|-----------|-----------|
+ * | 增肌 | 4.0       | 1.8       | 1.0       |
+ * | 保持 | 3.5       | 1.6       | 0.9       |
+ * | 减脂 | 2.5       | 2.0       | 0.8       |
+ *
+ * 蛋白质依据 ISSN 2017 立场声明：增肌/维持 1.4-2.0 g/kg 足够；减脂期取 2.0
+ * （高于增肌以应对热量缺口，但不进入 2.3-3.1 的备赛区间）。
+ *
+ * [calorieFactor] 保留下来只用于**参考展示**（把 TDEE 与实际目标热量放在一起对比），
+ * 不再参与宏量计算。
  */
 enum class GoalMode(
     val label: String,
     val calorieFactor: Double,
-    val carbsPct: Double,
-    val proteinPct: Double,
-    val fatPct: Double,
     val description: String
 ) {
-    BULK("增肌", 1.15, 0.45, 0.30, 0.25, "TDEE +15%"),
-    MAINTAIN("保持", 1.00, 0.50, 0.25, 0.25, "维持 TDEE 不变"),
-    CUT("减脂", 0.80, 0.35, 0.40, 0.25, "TDEE −20%");
+    BULK("增肌", 1.15, "碳水 4.0 / 蛋白 1.8 / 脂肪 1.0 g/kg"),
+    MAINTAIN("保持", 1.00, "碳水 3.5 / 蛋白 1.6 / 脂肪 0.9 g/kg"),
+    CUT("减脂", 0.80, "碳水 2.5 / 蛋白 2.0 / 脂肪 0.8 g/kg");
 
     companion object {
         fun fromStorage(value: String): GoalMode =

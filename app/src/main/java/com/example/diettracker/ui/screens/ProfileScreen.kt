@@ -63,7 +63,8 @@ import com.example.diettracker.ui.viewmodel.ProfileViewModel
 @Composable
 fun ProfileScreen(
     viewModel: ProfileViewModel,
-    onOpenGoals: () -> Unit = {}
+    onOpenGoals: () -> Unit = {},
+    onOpenRecords: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -100,6 +101,12 @@ fun ProfileScreen(
                     "蛋白 ${round(state.currentGoalProtein)}g / " +
                     "脂肪 ${round(state.currentGoalFat)}g",
                 onClick = onOpenGoals
+            )
+            Spacer(Modifier.height(8.dp))
+            EntryCard(
+                title = "我的 PR",
+                subtitle = "记录各个动作的最大重量（重量 / 次数 / 日期）",
+                onClick = onOpenRecords
             )
 
             Spacer(Modifier.height(16.dp))
@@ -247,10 +254,7 @@ fun ProfileScreen(
                                 )
                                 Spacer(Modifier.width(10.dp))
                                 Text(
-                                    text = "${mode.description} · 碳水 " +
-                                        "${(mode.carbsPct * 100).toInt()}% / 蛋白 " +
-                                        "${(mode.proteinPct * 100).toInt()}% / 脂肪 " +
-                                        "${(mode.fatPct * 100).toInt()}%",
+                                    text = mode.description,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -387,7 +391,7 @@ private fun EstimateCard(
             Spacer(Modifier.height(10.dp))
 
             EstimateRow("基础代谢 BMR（Mifflin）", "${round(estimate.bmrMifflin)} kcal")
-            EstimateRow("每日总消耗 TDEE", "${round(estimate.tdee)} kcal")
+            EstimateRow("每日总消耗 TDEE（参考）", "${round(estimate.tdee)} kcal")
             EstimateRow("目标热量", "${round(estimate.targetCalories)} kcal")
 
             if (hasBodyFat && estimate.bmrKatch != null) {
@@ -423,6 +427,14 @@ private fun EstimateCard(
             EstimateRow("碳水", "${round(estimate.targets.carbs)} g")
             EstimateRow("蛋白质", "${round(estimate.targets.protein)} g")
             EstimateRow("脂肪", "${round(estimate.targets.fat)} g")
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "碳蛋脂按体重算（增肌 4.0/1.8/1.0、保持 3.5/1.6/0.9、" +
+                    "减脂 2.5/2.0/0.8 g/kg），三者折算出的热量就是上面的目标热量；" +
+                    "TDEE 只作参考，不再直接决定目标。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
 
             Spacer(Modifier.height(10.dp))
             Text(

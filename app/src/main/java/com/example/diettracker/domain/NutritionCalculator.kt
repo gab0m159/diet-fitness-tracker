@@ -7,21 +7,34 @@ import com.example.diettracker.data.model.Sex
 import kotlin.math.roundToInt
 
 /**
- * All body-metric and macro-target math, as pure functions.
+ * 身体数据与宏量目标的计算，全部是纯函数。
  *
- * Keeping this free of Android/Room types means it can be reasoned about (and
- * unit-tested) directly. The UI only formats the results.
+ * 不依赖 Android / Room 类型，因此可以直接单测；界面只负责把结果格式化。
  *
- * ## The calculation chain
+ * ## 计算链（v7 起）
  *
- * 1. `bmrMifflin` — Mifflin-St Jeor BMR.
- * 2. `tdee` — BMR x activity multiplier.
- * 3. `targetCalories` — TDEE x the goal-mode factor.
- * 4. `macroTargets` — split those calories into grams using the goal's ratio,
- *    with Atwater factors 4 / 4 / 9 kcal per gram.
+ * 1. `bmrMifflin` —— Mifflin-St Jeor 的 BMR；
+ * 2. `tdee` —— BMR × 活动系数；
+ * 3. `macroTargets` —— **按体重给克数**（不是按热量百分比切）；
+ * 4. `targetCaloriesFromMacros` —— 目标热量 = 碳×4 + 蛋×4 + 脂×9。
  *
- * `bmrKatchMcArdle` is computed alongside as a **reference only**; by product
- * decision the default chain always uses Mifflin.
+ * ## 为什么改成按体重算宏量
+ *
+ * 早期版本是「TDEE × 倍率 → 按 50/25/25 等比例切」，结果是 70kg 的人拿到
+ * 碳水 324g / 蛋白 162g，明显偏高：蛋白质到了 2.3g/kg，碳水占了一半热量。
+ * 主流的健身做法是按体重直接定克数（蛋白 1.4-2.0 g/kg、脂肪 0.8-1.0 g/kg、
+ * 碳水按训练量给），所以现在：
+ *
+ * | 模式 | 碳水 g/kg | 蛋白 g/kg | 脂肪 g/kg |
+ * |------|-----------|-----------|-----------|
+ * | 增肌 | 4.0       | 1.8       | 1.0       |
+ * | 保持 | 3.5       | 1.6       | 0.9       |
+ * | 减脂 | 2.5       | 2.2       | 0.8       |
+ *
+ * 由此算出的三个克数**反过来决定热量目标**，界面上只显示这一个热量数字，
+ * 避免「热量目标和宏量对不上」的困惑。TDEE 仍然计算并显示，作为参考。
+ *
+ * `bmrKatchMcArdle` 只作为**参考值**并列显示；默认链路始终用 Mifflin。
  */
 object NutritionCalculator {
 
@@ -33,6 +46,39 @@ object NutritionCalculator {
     /** Katch-McArdle constants. */
     private const val KATCH_BASE = 370.0
     private const val KATCH_PER_KG_LBM = 21.6
+
+    /**
+     * 每公斤体重的克数。
+     *
+     * ## 蛋白质的依据
+     *
+     * ISSN（国际运动营养学会）2017 年立场声明（Jäger et al.）：
+     *  - 第 2 条：增肌与维持肌肉，**1.4–2.0 g/kg/天** 对大多数运动人群已经足够；
+     *  - 第 3 条：热量缺口期（减脂）为最大化保留瘦体重，可能需要 **2.3–3.1 g/kg**。
+     *
+     * 那个 2.3–3.1 是给**有训练经验的备赛运动员**的上限区间，且多按去脂体重研究；
+     * 对普通用户不现实（70kg 要 168g 蛋白 ≈ 700g 鸡胸肉）。同类研究里，
+     * 30% 热量缺口下 1.6 g/kg 已能达成约 70% 的减脂比例。
+     *
+     * 所以取：增肌 1.8 / 保持 1.6 / 减脂 2.0 —— 减脂高于增肌（符合"缺口期需要更多"），
+     * 但不进入不现实的区间。
+     *
+     * ## 脂肪与碳水
+     *
+     * 脂肪取 0.8–1.0 g/kg：通行底线是 0.5–0.6 g/kg（保激素），这里给得更宽裕。
+     * 碳水按训练强度给：增肌最高（训练量大）、减脂最低。
+     */
+    data class PerKgTargets(
+        val carbsPerKg: Double,
+        val proteinPerKg: Double,
+        val fatPerKg: Double
+    )
+
+    fun perKgTargets(goal: GoalMode): PerKgTargets = when (goal) {
+        GoalMode.BULK -> PerKgTargets(carbsPerKg = 4.0, proteinPerKg = 1.8, fatPerKg = 1.0)
+        GoalMode.MAINTAIN -> PerKgTargets(carbsPerKg = 3.5, proteinPerKg = 1.6, fatPerKg = 0.9)
+        GoalMode.CUT -> PerKgTargets(carbsPerKg = 2.5, proteinPerKg = 2.0, fatPerKg = 0.8)
+    }
 
     // ------------------------------------------------------------ BMR / TDEE
 
@@ -86,21 +132,36 @@ object NutritionCalculator {
     // ------------------------------------------------------------- targets
 
     /**
-     * Splits [calories] into macro grams using the goal's recommended ratio.
+     * 目标宏量：**按体重 × 每公斤克数**直接给（v7 起）。
      *
-     *   carbs   = calories x carbsPct   / 4
-     *   protein = calories x proteinPct / 4
-     *   fat     = calories x fatPct     / 9
+     * 不再从热量反推，所以这三个数才是"用户真正要吃的东西"；
+     * 目标热量由 [targetCaloriesFromMacros] 从它们反过来算。
      */
-    fun macroTargets(calories: Double, goal: GoalMode): Macros = Macros(
-        carbs = calories * goal.carbsPct / KCAL_PER_G_CARBS,
-        protein = calories * goal.proteinPct / KCAL_PER_G_PROTEIN,
-        fat = calories * goal.fatPct / KCAL_PER_G_FAT
-    )
+    fun macroTargets(weightKg: Double, goal: GoalMode): Macros {
+        if (weightKg <= 0.0) return Macros(0.0, 0.0, 0.0)
+        val perKg = perKgTargets(goal)
+        return Macros(
+            carbs = weightKg * perKg.carbsPerKg,
+            protein = weightKg * perKg.proteinPerKg,
+            fat = weightKg * perKg.fatPerKg
+        )
+    }
 
     /**
-     * The full estimate shown on the profile screen.
-     * [katchBmr] is null when no body-fat percentage was entered.
+     * 目标热量 = 碳×4 + 蛋×4 + 脂×9。
+     *
+     * 界面上只显示这一个热量目标，避免和 TDEE 参考值混淆。
+     */
+    fun targetCaloriesFromMacros(macros: Macros): Double =
+        macros.carbs * KCAL_PER_G_CARBS +
+            macros.protein * KCAL_PER_G_PROTEIN +
+            macros.fat * KCAL_PER_G_FAT
+
+    /**
+     * 完整估算结果（「我的」页显示的那一块）。
+     *
+     * [MacroEstimate.tdee] 仍然给出，用于告诉用户"你的消耗大概是多少"；
+     * 但 [MacroEstimate.targetCalories] 来自宏量之和，不是 TDEE × 倍率。
      */
     fun estimate(
         weightKg: Double,
@@ -113,15 +174,15 @@ object NutritionCalculator {
     ): MacroEstimate {
         val mifflin = bmrMifflin(weightKg, heightCm, age, sex)
         val tdeeValue = tdee(mifflin, activity)
-        val calories = targetCalories(tdeeValue, goal)
+        val targets = macroTargets(weightKg, goal)
         val katch = leanBodyMass(weightKg, bodyFatPercent)
             ?.let { bmrKatchMcArdle(weightKg, bodyFatPercent!!) }
         return MacroEstimate(
             bmrMifflin = mifflin,
             bmrKatch = katch,
             tdee = tdeeValue,
-            targetCalories = calories,
-            targets = macroTargets(calories, goal)
+            targetCalories = targetCaloriesFromMacros(targets),
+            targets = targets
         )
     }
 
